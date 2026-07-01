@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "istio-dashboard.fullname" . }}
+  labels:
+    {{- include "istio-dashboard.labels" . | nindent 4 }}
+---
+# The dashboard's own ServiceAccount needs ONLY cluster-scoped CRD reads (for
+# capabilities + auto-form schema extraction). All routing-resource reads/writes
+# use the end-user's bearer token (passthrough), so per-user Kubernetes RBAC —
+# not this SA — authorizes them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "istio-dashboard.fullname" . }}
+  labels:
+    {{- include "istio-dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "istio-dashboard.fullname" . }}
+  labels:
+    {{- include "istio-dashboard.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "istio-dashboard.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "istio-dashboard.fullname" . }}
+    namespace: {{ .Release.Namespace }}

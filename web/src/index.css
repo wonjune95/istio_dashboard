@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme tokens ─────────────────────────────────────────────────────────────
+   Primary accent is a single swappable variable (Istio blue now → flip to indigo
+   by editing the --accent* lines only). Airgap-safe: system font stacks, no CDN. */
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans KR', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+  /* ACCENT — swap these 3 lines to re-skin the whole app (e.g. indigo: 79 70 229 / 67 56 202 / 99 102 241) */
+  --accent: 37 99 235;        /* blue-600  */
+  --accent-hover: 29 78 216;  /* blue-700  */
+  --accent-ring: 59 130 246;  /* blue-500  */
+}
+
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
+body {
+  font-family: var(--font-sans);
+  @apply bg-gray-50 text-gray-800;
+}
+html.dark body {
+  @apply bg-slate-950 text-slate-200;
+}
+
+/* ── Semantic surface/control classes (dark-aware in one place) ───────────────── */
+@layer components {
+  .panel { @apply rounded-lg border border-gray-200 bg-white; }
+  .dark .panel { @apply border-slate-800/70 bg-slate-900; }
+
+  .panel-soft { @apply rounded-md border border-gray-200 bg-gray-50; }
+  .dark .panel-soft { @apply border-slate-800/70 bg-slate-900/60; }
+
+  .text-strong { @apply text-gray-900; }
+  .dark .text-strong { @apply text-slate-100; }
+  .text-muted { @apply text-gray-500; }
+  .dark .text-muted { @apply text-slate-400; }
+  .text-faint { @apply text-gray-400; }
+  .dark .text-faint { @apply text-slate-500; }
+  .border-base { @apply border-gray-200; }
+  .dark .border-base { @apply border-slate-800/70; }
+
+  .row-hover { @apply hover:bg-gray-50; }
+  .dark .row-hover { @apply hover:bg-slate-800/40; }
+
+  .input-base {
+    @apply w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800
+      focus:outline-none focus:ring-1;
+    border-color: rgb(209 213 219);
+  }
+  .input-base:focus { border-color: rgb(var(--accent-ring)); --tw-ring-color: rgb(var(--accent-ring)); }
+  .dark .input-base { @apply border-slate-700 bg-slate-950/60 text-slate-100; }
+
+  /* accent — driven by --accent so the whole app re-skins from one place */
+  .bg-accent { background-color: rgb(var(--accent)); }
+  .bg-accent:hover { background-color: rgb(var(--accent-hover)); }
+  .bg-accent-soft { background-color: rgb(var(--accent) / 0.1); }
+  .text-accent { color: rgb(var(--accent)); }
+  .dark .text-accent { color: rgb(var(--accent-ring)); }
+  .border-accent { border-color: rgb(var(--accent) / 0.4); }
+  .ring-accent { --tw-ring-color: rgb(var(--accent-ring)); }
+
+  .btn-primary {
+    @apply rounded-md px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40;
+    background-color: rgb(var(--accent));
+  }
+  .btn-primary:hover { background-color: rgb(var(--accent-hover)); }
+  .btn-ghost {
+    @apply rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50;
+  }
+  .dark .btn-ghost { @apply border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800; }
+
+  .chip { @apply rounded-full px-2 py-0.5 text-xs font-medium; }
+}
+
+/* ── rjsf auto-form (dark-aware) ──────────────────────────────────────────────── */
+.rjsf-compact input[type='text'],
+.rjsf-compact input[type='number'],
+.rjsf-compact select,
+.rjsf-compact textarea {
+  @apply w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800;
+}
+.dark .rjsf-compact input[type='text'],
+.dark .rjsf-compact input[type='number'],
+.dark .rjsf-compact select,
+.dark .rjsf-compact textarea {
+  @apply border-slate-700 bg-slate-950/60 text-slate-100;
+}
+.rjsf-compact label { @apply text-sm text-gray-600; }
+.dark .rjsf-compact label { @apply text-slate-300; }
+.rjsf-compact .field { @apply mb-2; }
+.rjsf-compact fieldset { @apply my-3 border-l-2 border-gray-100 pl-3; }
+.dark .rjsf-compact fieldset { @apply border-slate-800; }
+.rjsf-compact .array-item { @apply mb-2 flex items-start gap-2; }
+
+/* rjsf core renders Bootstrap glyphicon font icons we don't ship → hide and
+   give the add/remove buttons visible text + size. */
+.rjsf-compact .glyphicon { display: none; }
+.rjsf-compact .btn {
+  @apply mr-1 mt-1 inline-flex items-center rounded border border-gray-300 bg-gray-50 px-2 py-1 text-sm text-gray-700 hover:bg-gray-100;
+}
+.dark .rjsf-compact .btn { @apply border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700; }
+.rjsf-compact .btn-add::after { content: '+ 추가'; }
+.rjsf-compact .array-item-remove::after { content: '삭제'; }
+.rjsf-compact .array-item-move-up::after { content: '↑'; }
+.rjsf-compact .array-item-move-down::after { content: '↓'; }
+.rjsf-compact .array-item-copy::after { content: '복사'; }

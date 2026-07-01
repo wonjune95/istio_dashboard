@@ -1,0 +1,18 @@
+# Go
+/server
+*.exe
+*.test
+*.out
+
+# Vite build output (embedded at build time) — keep only the placeholder so go build compiles
+internal/assets/dist/*
+!internal/assets/dist/index.html
+
+# Node
+web/node_modules/
+web/dist/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/

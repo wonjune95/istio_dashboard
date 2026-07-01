@@ -1,0 +1,27 @@
+image:
+  repository: istio-dashboard
+  tag: dev
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# OIDC: the cluster API server must trust this same issuer (token passthrough).
+# Leave issuer empty only for trusted/dev clusters — then the app does no token
+# verification (Kubernetes RBAC still authorizes).
+oidc:
+  issuer: ""
+  audience: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+serviceMonitor:
+  enabled: false

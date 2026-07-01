@@ -1,0 +1,6 @@
+apiVersion: v2
+name: istio-dashboard
+description: Istio configuration console — manage HTTPRoute/VirtualService/DestinationRule and other Istio + Gateway API resources via forms or YAML.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
