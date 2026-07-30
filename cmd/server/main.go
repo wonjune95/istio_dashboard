@@ -62,7 +62,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              *addr,
-		Handler:           logRequests(observability.Instrument(mux)),
+		Handler:           logRequests(observability.Instrument(securityHeaders(mux))),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -90,6 +90,22 @@ func writeText(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(body))
+}
+
+// securityHeaders sets baseline hardening headers. The SPA is fully self-contained
+// (no external scripts/styles/fonts), so a same-origin CSP is safe. CodeMirror and
+// React inject inline styles, hence style-src 'unsafe-inline'. frame-ancestors 'none'
+// + X-Frame-Options block clickjacking on the token-entry screen.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // logRequests is a minimal structured access log.

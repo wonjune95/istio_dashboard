@@ -9,6 +9,9 @@ imagePullSecrets: []
 # 앱이 무상태라 HA가 필요하면 그냥 올리면 된다 (2+ = 무중단 롤아웃).
 replicaCount: 1
 
+# istiod가 설치된 네임스페이스 — 홈 화면의 컨트롤플레인 버전 표시에 사용.
+istioNamespace: istio-system
+
 service:
   type: ClusterIP
   port: 8080

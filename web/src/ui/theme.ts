@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-// Dark-by-default theme (Gemini: ops console). Persisted to localStorage, applied
+// Light-by-default theme. Persisted to localStorage, applied
 // as a class on <html> so Tailwind's `dark:` variants + .dark CSS rules switch.
 export type Theme = 'dark' | 'light'
 
@@ -8,7 +8,7 @@ const KEY = 'istio-dash-theme'
 
 export function initialTheme(): Theme {
   const saved = localStorage.getItem(KEY)
-  return saved === 'light' ? 'light' : 'dark' // default dark
+  return saved === 'dark' ? 'dark' : 'light' // default light
 }
 
 export function applyTheme(t: Theme) {

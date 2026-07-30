@@ -47,6 +47,8 @@ type ClientFactory struct {
 	catalog     []ResolvedType // lazily cached; restart to pick up newly installed CRDs
 	schemaMu    sync.Mutex
 	schemaCache map[string]json.RawMessage // typeID -> spec schema
+	istiodMu    sync.Mutex
+	istiodVer   *string // lazily cached control-plane version ("" = not detected)
 }
 
 func NewClientFactory(dev bool, kubeconfig string) (*ClientFactory, error) {

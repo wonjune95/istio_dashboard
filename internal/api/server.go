@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 
 	"istio-dashboard/internal/auth"
 	"istio-dashboard/internal/k8s"
@@ -17,6 +19,7 @@ type ClientSource interface {
 	CatalogCached() ([]k8s.ResolvedType, error)
 	DetectCRDs() (k8s.CRDInfo, error)
 	SpecSchema(typeID string) (json.RawMessage, error)
+	IstiodVersion(ctx context.Context) string
 }
 
 // Server holds injected dependencies and exposes the JSON API handlers.
@@ -24,6 +27,9 @@ type Server struct {
 	dev      bool
 	factory  ClientSource
 	verifier auth.Verifier
+
+	auditMu  sync.Mutex
+	auditLog []AuditEntry // newest first, capped at auditKeep
 }
 
 func NewServer(dev bool, factory ClientSource, verifier auth.Verifier) *Server {
@@ -41,6 +47,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /api/gateways", s.withK8s(http.HandlerFunc(s.handleGateways)))
 	mux.Handle("GET /api/services", s.withK8s(http.HandlerFunc(s.handleServices)))
 	mux.Handle("GET /api/subsets", s.withK8s(http.HandlerFunc(s.handleSubsets)))
+	mux.Handle("GET /api/audit", s.withK8s(http.HandlerFunc(s.handleAudit)))
 	// Unmatched /api/* returns JSON 404 (not the SPA index.html fallback).
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NotFound", "no such API endpoint: "+r.URL.Path)

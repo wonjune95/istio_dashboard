@@ -52,6 +52,7 @@ func (s *stubSource) ResolveType(typeID string) (k8s.ResolvedType, error) {
 func (s *stubSource) CatalogCached() ([]k8s.ResolvedType, error) { return nil, nil }
 func (s *stubSource) DetectCRDs() (k8s.CRDInfo, error)           { return k8s.CRDInfo{}, nil }
 func (s *stubSource) SpecSchema(string) (json.RawMessage, error) { return nil, errors.New("none") }
+func (s *stubSource) IstiodVersion(context.Context) string       { return "" }
 
 func newTestMux(t *testing.T, source ClientSource) *http.ServeMux {
 	t.Helper()

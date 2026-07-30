@@ -7,6 +7,7 @@ export interface Capabilities {
   virtualServiceInstalled: boolean
   gatewayAPIVersion?: string
   istioApiVersion?: string
+  istiodVersion?: string // 컨트롤플레인 실제 버전, e.g. "1.30.2"
   namespaceListAllowed: boolean
   devMode: boolean
   user?: string

@@ -16,7 +16,6 @@ import { FORMS } from '../forms/registry'
 import { AutoForm } from '../forms/AutoForm'
 import { useToast } from '../components/Toast'
 import { KindBadge } from '../components/KindBadge'
-import { recordAction } from '../ui/recentActions'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -145,6 +144,9 @@ export function ResourceEdit() {
   const [preview, setPreview] = useState<{ oldYaml: string; newYaml: string } | null>(null)
   const [conflict, setConflict] = useState<{ mineYaml: string; latestYaml: string; latestRV: string } | null>(null)
 
+  /* eslint-disable react-hooks/set-state-in-effect --
+     one-time editor init: text/tab can only be seeded after the resource query
+     resolves, and the `text !== null` guard makes this run exactly once. */
   useEffect(() => {
     if (text !== null || !rt) return
     let initial: string
@@ -160,6 +162,7 @@ export function ResourceEdit() {
       setTab('form')
     }
   }, [isEdit, type, rt, resource.data, text, curated, hasAuto])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   let obj: any = null
   let parseErr: string | null = null
@@ -181,7 +184,7 @@ export function ResourceEdit() {
   const cantApply = readOnly || noCreate
 
   // A read-only resource forces the YAML tab (editor locked) — no point showing a form.
-  useEffect(() => { if (readOnly && tab === 'form') setTab('yaml') }, [readOnly, tab])
+  const shownTab: Tab = readOnly && tab === 'form' ? 'yaml' : tab
 
   function switchTab(t: Tab) {
     if (t === 'form' && !formAvailable) {
@@ -210,8 +213,8 @@ export function ResourceEdit() {
       if (dryRun) toast('success', '검증 통과 — 적용 가능합니다.')
       else {
         toast('success', isEdit ? '수정이 적용되었습니다.' : '생성되었습니다.')
-        recordAction({ verb: isEdit ? 'update' : 'create', kind: rt?.kind ?? type, ns: (body as any)?.metadata?.namespace ?? ns, name: (body as any)?.metadata?.name ?? name, ok: true })
         queryClient.invalidateQueries({ queryKey: ['resources', type] })
+        queryClient.invalidateQueries({ queryKey: ['audit'] })
         navigate(`/resources/${type}`)
       }
     } catch (e) {
@@ -242,8 +245,8 @@ export function ResourceEdit() {
     try {
       await apiPut(`/api/resources/${type}/${ns}/${name}`, body)
       toast('success', '최신 버전 위에 적용되었습니다.')
-      recordAction({ verb: 'update', kind: rt?.kind ?? type, ns, name, ok: true })
       queryClient.invalidateQueries({ queryKey: ['resources', type] })
+      queryClient.invalidateQueries({ queryKey: ['audit'] })
       navigate(`/resources/${type}`)
     } catch (e) {
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
@@ -280,8 +283,8 @@ export function ResourceEdit() {
     try {
       await apiDelete(`/api/resources/${type}/${ns}/${name}`)
       toast('success', '삭제되었습니다.')
-      recordAction({ verb: 'delete', kind: rt?.kind ?? type, ns, name, ok: true })
       queryClient.invalidateQueries({ queryKey: ['resources', type] })
+      queryClient.invalidateQueries({ queryKey: ['audit'] })
       navigate(`/resources/${type}`)
     } catch (e) {
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
@@ -322,19 +325,19 @@ export function ResourceEdit() {
       )}
 
       <div className="flex items-center gap-1 border-b border-base">
-        <TabButton active={tab === 'form'} disabled={!formAvailable || readOnly} onClick={() => switchTab('form')}>폼</TabButton>
-        <TabButton active={tab === 'yaml'} onClick={() => switchTab('yaml')}>YAML</TabButton>
+        <TabButton active={shownTab === 'form'} disabled={!formAvailable || readOnly} onClick={() => switchTab('form')}>폼</TabButton>
+        <TabButton active={shownTab === 'yaml'} onClick={() => switchTab('yaml')}>YAML</TabButton>
         {curated && !formAvailable && !parseErr && (
           <span className="ml-3 self-center text-xs text-amber-600 dark:text-amber-400">고급 필드 감지 — YAML 전용</span>
         )}
-        {tab === 'form' && formAvailable && (
+        {shownTab === 'form' && formAvailable && (
           <span className="ml-auto self-center pb-1 text-xs text-faint">
             <span className="text-red-500">*</span> 필수 · <span className="text-amber-600 dark:text-amber-400">(권장)</span> 채우면 좋음 · (선택) 부가
           </span>
         )}
       </div>
 
-      {tab === 'form' && formAvailable && curated ? (
+      {shownTab === 'form' && formAvailable && curated ? (
         curated.render({
           model: curated.toModel(obj),
           onChange: (m: any) => setText(yamlDump(curated.fromModel(obj, m))),
@@ -342,7 +345,7 @@ export function ResourceEdit() {
           services: services.data ?? [],
           lockIdentity: isEdit,
         })
-      ) : tab === 'form' && formAvailable && hasAuto ? (
+      ) : shownTab === 'form' && formAvailable && hasAuto ? (
         <AutoForm
           type={type}
           spec={obj?.spec ?? {}}

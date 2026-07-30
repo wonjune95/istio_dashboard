@@ -40,6 +40,8 @@ spec:
               value: {{ .Values.oidc.issuer | quote }}
             - name: OIDC_AUDIENCE
               value: {{ .Values.oidc.audience | quote }}
+            - name: ISTIO_NAMESPACE
+              value: {{ .Values.istioNamespace | quote }}
             # client-go / libraries may write under $HOME; point it at a writable
             # emptyDir so readOnlyRootFilesystem holds (Gemini review).
             - name: HOME

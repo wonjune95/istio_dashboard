@@ -30,7 +30,11 @@ const allowed = (obj: Any, keys: string[]) =>
 export function isHTTPRepresentable(obj: Any): boolean {
   const spec = obj?.spec ?? {}
   for (const p of spec.parentRefs ?? []) {
-    if (!allowed(p, ['name', 'namespace', 'sectionName'])) return false
+    // group/kind are API-server defaults on stored objects — representable
+    // as long as they still point at a Gateway.
+    if (!allowed(p, ['group', 'kind', 'name', 'namespace', 'sectionName'])) return false
+    if (p.group != null && p.group !== 'gateway.networking.k8s.io') return false
+    if (p.kind != null && p.kind !== 'Gateway') return false
   }
   for (const rule of spec.rules ?? []) {
     if (!allowed(rule, ['matches', 'backendRefs'])) return false
@@ -43,7 +47,10 @@ export function isHTTPRepresentable(obj: Any): boolean {
       if (t && t !== 'PathPrefix' && t !== 'Exact') return false
     }
     for (const b of rule.backendRefs ?? []) {
-      if (!allowed(b, ['name', 'port', 'weight'])) return false
+      // Same: tolerate defaulted group/kind, but only plain Service backends.
+      if (!allowed(b, ['group', 'kind', 'name', 'port', 'weight'])) return false
+      if (b.group != null && b.group !== '') return false
+      if (b.kind != null && b.kind !== 'Service') return false
     }
   }
   return true

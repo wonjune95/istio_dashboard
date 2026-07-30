@@ -1,14 +1,12 @@
 <!doctype html>
-<html lang="ko" class="dark">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Istio Dashboard</title>
-    <script>
-      // Apply saved theme before paint to avoid a flash (default dark).
-      try { if (localStorage.getItem('istio-dash-theme') === 'light') document.documentElement.classList.remove('dark') } catch (e) {}
-    </script>
+    <!-- 페인트 전에 저장된 테마 적용 (CSP script-src 'self' 유지를 위해 외부 파일) -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

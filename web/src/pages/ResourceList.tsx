@@ -5,7 +5,6 @@ import { useResources, type ResourceSummary, type ResourceDetail } from '../api/
 import { useResourceTypes } from '../api/resourceTypes'
 import { useNamespaces } from '../api/namespaces'
 import { useNamespace } from '../ui/namespace'
-import { recordAction } from '../ui/recentActions'
 import { apiGet, apiDelete, ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
 import { KindBadge } from '../components/KindBadge'
@@ -29,7 +28,8 @@ export function ResourceList() {
   function toggle(k: string) {
     setSelected((s) => {
       const n = new Set(s)
-      n.has(k) ? n.delete(k) : n.add(k)
+      if (n.has(k)) n.delete(k)
+      else n.add(k)
       return n
     })
   }
@@ -42,11 +42,11 @@ export function ResourceList() {
     try {
       await apiDelete(`/api/resources/${type}/${r.namespace || '-'}/${r.name}`)
       toast('success', '삭제되었습니다.')
-      recordAction({ verb: 'delete', kind: r.kind, ns: r.namespace, name: r.name, ok: true })
       queryClient.invalidateQueries({ queryKey: ['resources', type] })
     } catch (e) {
-      recordAction({ verb: 'delete', kind: r.kind, ns: r.namespace, name: r.name, ok: false })
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
+    } finally {
+      queryClient.invalidateQueries({ queryKey: ['audit'] })
     }
   }
 

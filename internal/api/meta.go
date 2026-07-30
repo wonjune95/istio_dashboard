@@ -15,6 +15,7 @@ type capabilities struct {
 	VirtualServiceInstalled bool   `json:"virtualServiceInstalled"`
 	GatewayAPIVersion       string `json:"gatewayAPIVersion,omitempty"`
 	IstioAPIVersion         string `json:"istioApiVersion,omitempty"`
+	IstiodVersion           string `json:"istiodVersion,omitempty"` // control-plane version, e.g. "1.30.2"
 	NamespaceListAllowed    bool   `json:"namespaceListAllowed"`
 	DevMode                 bool   `json:"devMode"`
 	User                    string `json:"user,omitempty"`
@@ -42,6 +43,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		VirtualServiceInstalled: crd.VirtualService,
 		GatewayAPIVersion:       crd.GatewayAPIVersion,
 		IstioAPIVersion:         crd.IstioAPIVersion,
+		IstiodVersion:           s.factory.IstiodVersion(r.Context()),
 		NamespaceListAllowed:    nsAllowed,
 		DevMode:                 s.dev,
 		User:                    identityFrom(r.Context()).User(),

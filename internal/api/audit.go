@@ -3,12 +3,40 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"time"
 
 	"istio-dashboard/internal/k8s"
 )
 
+// AuditEntry is one non-dry-run mutation performed through the dashboard.
+// Entries live in an in-memory ring (auditKeep) shared by all users — the app is
+// deliberately store-less (DESIGN.md), so this history resets on pod restart;
+// the structured audit log below is the durable record.
+type AuditEntry struct {
+	Time      time.Time `json:"time"`
+	User      string    `json:"user,omitempty"`
+	Verb      string    `json:"verb"` // create | update | delete
+	TypeID    string    `json:"typeId"`
+	Namespace string    `json:"namespace"`
+	Name      string    `json:"name"`
+	OK        bool      `json:"ok"`
+}
+
+const auditKeep = 200
+
+// handleAudit returns the recent mutation history (newest first).
+func (s *Server) handleAudit(w http.ResponseWriter, _ *http.Request) {
+	s.auditMu.Lock()
+	entries := make([]AuditEntry, len(s.auditLog))
+	copy(entries, s.auditLog)
+	s.auditMu.Unlock()
+	writeJSON(w, http.StatusOK, entries)
+}
+
 // auditResource audits a generic-engine mutation, flagging high-risk kinds so
-// monitoring can alert on them (Gemini review ⑦).
+// monitoring can alert on them (Gemini review ⑦), and records it in the
+// in-memory history served at /api/audit.
 func (s *Server) auditResource(ctx context.Context, verb, typeID, ns, name string, dryRun bool, err error) {
 	if dryRun {
 		return
@@ -31,4 +59,19 @@ func (s *Server) auditResource(ctx context.Context, verb, typeID, ns, name strin
 	default:
 		slog.Info("resource mutated", attrs...)
 	}
+
+	s.auditMu.Lock()
+	s.auditLog = append([]AuditEntry{{
+		Time:      time.Now(),
+		User:      identityFrom(ctx).User(),
+		Verb:      verb,
+		TypeID:    typeID,
+		Namespace: ns,
+		Name:      name,
+		OK:        err == nil,
+	}}, s.auditLog...)
+	if len(s.auditLog) > auditKeep {
+		s.auditLog = s.auditLog[:auditKeep]
+	}
+	s.auditMu.Unlock()
 }
