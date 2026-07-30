@@ -5,7 +5,9 @@ import { apiGet } from './client'
 // text fields into suggest-as-you-type dropdowns linked to real cluster resources,
 // with existence warnings — without forcing the value (free text stays valid, so
 // external hosts / cross-ns refs don't break). Datalist, not <select>.
-export type RefKind = 'service' | 'gateway' | 'subset'
+// 'gateway'     — Istio-style string ref (VS spec.gateways): cross-ns uses "ns/name"
+// 'gatewayName' — Gateway API parentRefs[].name: bare name only (ns is a sibling field)
+export type RefKind = 'service' | 'gateway' | 'gatewayName' | 'subset'
 
 export interface RefOption {
   value: string // canonical value inserted/matched
@@ -24,6 +26,7 @@ interface SubsetRef { namespace: string; dr: string; host: string; name: string 
 const ENDPOINT: Record<RefKind, string> = {
   service: 'services',
   gateway: 'gateways',
+  gatewayName: 'gateways',
   subset: 'subsets',
 }
 
@@ -31,7 +34,7 @@ const ISTIO_GW = 'gateways.networking.istio.io'
 const GWAPI_GW = 'gateways.gateway.networking.k8s.io'
 const DR_TYPE = 'destinationrules.networking.istio.io'
 
-function normalize(kind: RefKind, raw: unknown): RefOption[] {
+function normalize(kind: RefKind, raw: unknown, ns: string): RefOption[] {
   if (!Array.isArray(raw)) return []
   if (kind === 'service') {
     return (raw as ServiceRef[]).map((s) => ({
@@ -40,15 +43,19 @@ function normalize(kind: RefKind, raw: unknown): RefOption[] {
       aliases: [`${s.name}.${s.namespace}`, `${s.name}.${s.namespace}.svc`, `${s.name}.${s.namespace}.svc.cluster.local`],
     }))
   }
-  if (kind === 'gateway') {
-    return (raw as GatewayRef[]).map((g) => ({
-      value: g.name,
-      label: `${g.name} (${g.type})`,
-      aliases: [`${g.namespace}/${g.name}`],
+  if (kind === 'gateway' || kind === 'gatewayName') {
+    const gws: RefOption[] = (raw as GatewayRef[]).map((g) => ({
+      // Istio string refs need "ns/name" for cross-namespace gateways; parentRefs
+      // carry the namespace in a sibling field so only the bare name goes in.
+      value: kind === 'gatewayName' || g.namespace === ns ? g.name : `${g.namespace}/${g.name}`,
+      label: `${g.namespace}/${g.name} (${g.type})`,
+      aliases: [g.name, `${g.namespace}/${g.name}`],
       navTypeId: g.type === 'istio' ? ISTIO_GW : GWAPI_GW,
       navNs: g.namespace,
       navName: g.name,
     }))
+    if (kind === 'gateway') gws.unshift({ value: 'mesh', label: 'mesh — Gateway 없이 사이드카에 적용' })
+    return gws
   }
   return (raw as SubsetRef[]).map((s) => ({
     value: s.name,
@@ -61,11 +68,15 @@ function normalize(kind: RefKind, raw: unknown): RefOption[] {
 }
 
 export function useReferenceOptions(kind: RefKind, ns: string) {
+  // Gateways are few and routinely live in another namespace (e.g. a shared
+  // traefik/istio-ingress ns) — scoping them to the form's ns yields an empty
+  // dropdown, so list cluster-wide. Services/subsets stay namespace-scoped.
+  const allNs = kind === 'gateway' || kind === 'gatewayName'
   return useQuery({
-    queryKey: ['ref', kind, ns],
-    queryFn: () => apiGet<unknown>(`/api/${ENDPOINT[kind]}?ns=${ns}`),
-    enabled: !!ns,
+    queryKey: ['ref', kind, allNs ? '' : ns],
+    queryFn: () => apiGet<unknown>(`/api/${ENDPOINT[kind]}?ns=${allNs ? '' : ns}`),
+    enabled: allNs || !!ns,
     staleTime: 30_000,
-    select: (raw) => normalize(kind, raw),
+    select: (raw) => normalize(kind, raw, ns),
   })
 }

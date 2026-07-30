@@ -8,6 +8,7 @@ package k8s
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -30,15 +31,22 @@ type Clients struct {
 	Dynamic dynamic.Interface
 }
 
+// ErrTokenRequired is returned by ForToken when a non-dev request carries no
+// bearer token. Without this guard the request would silently act as the pod's
+// ServiceAccount instead of a user. Handlers map it to 401.
+var ErrTokenRequired = errors.New("bearer token required")
+
 type ClientFactory struct {
 	dev     bool
 	baseCfg *rest.Config // dev: local kubeconfig; prod: in-cluster SA (discovery only)
 	baseDyn dynamic.Interface
 
-	catMu     sync.Mutex
-	catalog   []ResolvedType            // lazily cached; restart to pick up newly installed CRDs
-	schemaMu  sync.Mutex
-	schemaCxe map[string]json.RawMessage // typeID -> spec schema (cached)
+	newDiscovery func() (discovery.DiscoveryInterface, error) // swappable in tests
+
+	catMu       sync.Mutex
+	catalog     []ResolvedType // lazily cached; restart to pick up newly installed CRDs
+	schemaMu    sync.Mutex
+	schemaCache map[string]json.RawMessage // typeID -> spec schema
 }
 
 func NewClientFactory(dev bool, kubeconfig string) (*ClientFactory, error) {
@@ -63,12 +71,21 @@ func NewClientFactory(dev bool, kubeconfig string) (*ClientFactory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("base dynamic client: %w", err)
 	}
-	return &ClientFactory{dev: dev, baseCfg: cfg, baseDyn: baseDyn}, nil
+	f := &ClientFactory{dev: dev, baseCfg: cfg, baseDyn: baseDyn}
+	f.newDiscovery = func() (discovery.DiscoveryInterface, error) {
+		return discovery.NewDiscoveryClientForConfig(f.baseCfg)
+	}
+	return f, nil
 }
 
 // ForToken returns clients acting as the user identified by bearerToken.
-// In dev (or when no token is supplied) they act as the base kubeconfig identity.
+// In dev they act as the base kubeconfig identity; outside dev a token is
+// mandatory — falling back to the base (SA) config would let unauthenticated
+// requests act as the pod's ServiceAccount.
 func (f *ClientFactory) ForToken(bearerToken string) (*Clients, error) {
+	if !f.dev && bearerToken == "" {
+		return nil, ErrTokenRequired
+	}
 	cfg := f.userConfig(bearerToken)
 	kube, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
@@ -90,7 +107,7 @@ func (f *ClientFactory) ForToken(bearerToken string) (*Clients, error) {
 }
 
 func (f *ClientFactory) userConfig(bearerToken string) *rest.Config {
-	if f.dev || bearerToken == "" {
+	if f.dev {
 		return f.baseCfg
 	}
 	// Keep the base transport (TLS/CA, host) but swap auth to the user's token,
@@ -106,5 +123,5 @@ func (f *ClientFactory) userConfig(bearerToken string) *rest.Config {
 // Discovery returns a discovery client on the base config — cluster-scoped CRD
 // presence/version checks only.
 func (f *ClientFactory) Discovery() (discovery.DiscoveryInterface, error) {
-	return discovery.NewDiscoveryClientForConfig(f.baseCfg)
+	return f.newDiscovery()
 }

@@ -14,6 +14,30 @@ const REF_FIELD: Record<string, RefKind> = {
   gateway: 'gateway',
 }
 
+// Arrays of reference objects where the referencing field is `name` inside each
+// item ("name" alone is too generic to map globally). Covers the Gateway API
+// kinds that use the auto-form (GRPC/TCP/TLS routes — HTTPRoute has a curated form).
+const NESTED_REF: Record<string, RefKind> = {
+  parentRefs: 'gatewayName', // bare name — ns goes in the sibling namespace field
+  backendRefs: 'service',
+}
+
+// Fields that are optional in the API but shouldn't be skipped thoughtlessly —
+// rendered with a "(권장)" badge instead of "(선택)" (e.g. exportTo: the default
+// is export-to-all-namespaces, which is rarely what a multi-tenant cluster wants).
+const RECOMMENDED_FIELD = new Set(['exportTo'])
+
+// Istio CRD schemas mark `required` on nested objects but never at the spec top
+// level, so without help every top-level field renders "(선택)". This overlay
+// injects the practically-required fields (same judgment as the YAML starter
+// templates' "(필수)" comments); nested levels keep the CRD's own `required`.
+const REQUIRED_TOP: Record<string, string[]> = {
+  'virtualservices.networking.istio.io': ['hosts'],
+  'destinationrules.networking.istio.io': ['host'],
+  'gateways.networking.istio.io': ['selector', 'servers'],
+  'serviceentries.networking.istio.io': ['hosts', 'ports'],
+}
+
 // Transforms a K8s openAPIV3Schema into something rjsf can render without
 // crashing. K8s/Istio schemas carry several constructs rjsf chokes on; we strip
 // or down-convert them, accepting looser client validation (the server dry-run is
@@ -23,6 +47,8 @@ export function sanitizeSchema(input: any, typeId = ''): { jsonSchema: any; uiSc
   const jsonSchema = structuredClone(input ?? { type: 'object' })
   const uiSchema: any = {}
   walk(jsonSchema, uiSchema, typeId)
+  const extra = REQUIRED_TOP[typeId]?.filter((f) => jsonSchema.properties?.[f])
+  if (extra?.length) jsonSchema.required = [...new Set([...(jsonSchema.required ?? []), ...extra])]
   return { jsonSchema, uiSchema }
 }
 
@@ -74,6 +100,16 @@ function walk(node: any, ui: any, typeId: string): void {
         if (example) extra['ui:placeholder'] = example
         if (node.properties[key]?.type === 'array') childUi.items = { ...childUi.items, ...extra }
         else Object.assign(childUi, extra)
+      }
+      if (RECOMMENDED_FIELD.has(key)) {
+        childUi['ui:options'] = { ...childUi['ui:options'], recommended: true }
+      }
+      const nestedRef = NESTED_REF[key]
+      if (nestedRef && node.properties[key]?.type === 'array') {
+        childUi.items = {
+          ...childUi.items,
+          name: { ...childUi.items?.name, 'ui:widget': 'reference', 'ui:options': { refKind: nestedRef } },
+        }
       }
       if (Object.keys(childUi).length > 0) ui[key] = childUi
     }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"istio-dashboard/internal/k8s"
@@ -73,8 +74,14 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dryRun := r.URL.Query().Get("dryRun") == "true"
+	// Target from the body, so a rejected create is still audited with the
+	// intended namespace/name; on success the server's canonical values win.
+	ns, name := rawMeta(raw)
 	detail, err := p.Create(ctx, raw, dryRun)
-	s.auditResource(ctx, "create", typeID, detail.Namespace, detail.Name, dryRun, err)
+	if err == nil {
+		ns, name = detail.Namespace, detail.Name
+	}
+	s.auditResource(ctx, "create", typeID, ns, name, dryRun, err)
 	if err != nil {
 		writeWriteError(w, err)
 		return
@@ -84,6 +91,19 @@ func (s *Server) handleCreateResource(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, detail)
+}
+
+// rawMeta extracts metadata.namespace/name from a request body. Malformed JSON
+// yields empty strings; the write path reports the parse error itself.
+func rawMeta(raw json.RawMessage) (ns, name string) {
+	var m struct {
+		Metadata struct {
+			Namespace string `json:"namespace"`
+			Name      string `json:"name"`
+		} `json:"metadata"`
+	}
+	_ = json.Unmarshal(raw, &m)
+	return m.Metadata.Namespace, m.Metadata.Name
 }
 
 func (s *Server) handleUpdateResource(w http.ResponseWriter, r *http.Request) {

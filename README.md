@@ -48,6 +48,7 @@ sequenceDiagram
 
 - **Bearer 토큰 패스스루** — 백엔드는 사용자 토큰을 저장·가공하지 않고 요청마다 K8s 클라이언트 생성에 그대로 주입한다. 모든 읽기·쓰기가 사용자 본인으로 수행되며, 인가는 클러스터 RBAC가 판단한다. 대시보드에 권한 우회 표면이 존재하지 않는다.
 - **OIDC 검증은 얇은 선택 레이어** — issuer/audience를 검증해 조기 401 + 감사용 identity를 뽑는다. 끄면(`OIDC_ISSUER` 미설정) 검증을 건너뛰되 패스스루는 그대로라, 비-OIDC 환경(SA 토큰)이나 dev(로컬 kubeconfig)에서도 코드 변경 없이 동작한다.
+- **브라우저 로그인** — 토큰 없이 접속하면 401과 함께 토큰 입력 화면(TokenGate)이 뜬다. 입력된 토큰은 `sessionStorage`에만 보관되고(서버 무저장) 모든 API 호출의 Bearer로 실린다. 유효하지 않은 토큰은 첫 화면에서 걸러진다 — `/api/capabilities`가 SelfSubjectAccessReview로 토큰을 검증해 401을 돌려주므로, 깨진 토큰으로 로그인 게이트를 통과하는 일이 없다. 헤더의 로그아웃 버튼으로 토큰을 지운다.
 - **무상태 HA** — 세션이 토큰에만 있으므로 스티키 세션·공유 캐시가 필요 없다.
 - **에어갭** — 프론트 번들을 바이너리에 인라인. 런타임 외부 의존 0.
 
@@ -76,7 +77,8 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 
 ### 스키마 자동 폼 + YAML 이중 편집
 - `react-jsonschema-form`이 CRD OpenAPI 스키마를 읽어 입력 폼을 자동 생성 — YAML을 몰라도 안전하게 편집.
-- **참조 해결 폼** — `host`는 Service, `gateways`는 Gateway로 실제 클러스터 리소스를 드롭다운 제안하고, 존재 여부 배지(✓/⚠)와 바로가기 링크를 붙인다. 외부 호스트·크로스 NS 참조를 막지 않도록 free-text는 유지한다.
+- **필수/권장 표시** — 모든 필드에 `*`(필수) · `(권장)` · `(선택)` 배지. CRD 스키마의 `required`에 더해, Istio 스키마가 최상위에 required를 안 적는 문제를 curated 목록으로 보완한다(VS `hosts`, DR `host`, Gateway `selector`/`servers`, SE `hosts`/`ports`). `exportTo`처럼 API상 선택이지만 실무상 채워야 하는 필드는 `(권장)`으로 구분한다. 필수 섹션의 아코디언은 처음부터 펼쳐진다.
+- **참조 해결 폼** — `host`/`backendRefs`는 Service, `subset`은 DestinationRule subset, `gateways`/`parentRefs`는 Gateway로 실제 클러스터 리소스를 자동완성 제안하고, 존재 여부 배지(✓/⚠)와 바로가기 링크를 붙인다. Gateway는 공용 네임스페이스에 사는 게 보통이라 클러스터 전체에서 조회하고, 다른 NS 것을 고르면 Istio 규격대로 `ns/이름`을 넣어준다(`mesh` 옵션 포함). 외부 호스트·크로스 NS 참조를 막지 않도록 free-text는 유지한다.
 - 폼 ↔ YAML 상호 동기화. 폼이 표현 못 하는 고급 필드가 있으면 폼 탭을 잠그고 "YAML 전용"으로 안내 → 필드 유실 방지.
 
 ### UI
@@ -110,8 +112,10 @@ make build               # web 빌드 → internal/assets/dist 임베드 → bin
 ### 컨테이너 · Helm
 ```bash
 make docker              # 멀티스테이지(node→go→distroless), non-root 이미지
-helm install istio-dashboard ./deploy/helm -n istio-system --create-namespace
+helm install istio-dashboard ./deploy/helm -n istio-system \
+  --set image.repository=<registry>/istio-dashboard --set image.tag=<tag>
 ```
+주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`, `oidc.issuer`/`oidc.audience`. 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다. 외부 노출은 클러스터의 Gateway에 HTTPRoute 하나 붙이면 된다.
 
 ---
 
@@ -154,7 +158,9 @@ istio_dashboard/
 │  ├─ assets/                  # 빌드된 React(dist) embed + SPA fallback
 │  └─ observability/           # slog 로깅, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
-├─ deploy/helm/                # Chart: deployment / service / rbac / values
+├─ deploy/
+│  ├─ helm/                    # Chart: deployment / service / rbac / values
+│  └─ examples/                # editor-rbac.yaml — 사용자용 편집자 ClusterRole 예시
 ├─ Dockerfile  Makefile  go.mod
 ```
 
@@ -166,7 +172,7 @@ istio_dashboard/
 ## 개발
 
 ```bash
-make test    # go test ./...  (에러 매핑 등 단위 테스트)
+make test    # go test ./...  (인증 경계·레지스트리 캐시·쓰기 가드·감사 로그 등 단위 테스트, fake client 기반)
 make vet     # go vet ./...
 make tidy    # go mod tidy
 ```
@@ -174,6 +180,13 @@ make tidy    # go mod tidy
 ## RBAC
 
 대시보드 파드의 ServiceAccount는 **CRD discovery 최소 권한만** 갖는다. 실제 라우트 읽기/쓰기 권한은 **각 사용자의 K8s RBAC**로 부여한다 — 운영자는 viewer/editor ClusterRole을 사용자에게 바인딩한다(대상: `*.networking.istio.io`, `*.gateway.networking.k8s.io`, `namespaces`). 대시보드는 권한을 대행하지 않으므로, 누가 무엇을 바꿀 수 있는지는 클러스터 RBAC 정책 그대로다.
+
+편집자 역할 예시가 `deploy/examples/editor-rbac.yaml`에 있다. 적용 후 토큰을 발급해 로그인 화면에 붙여넣으면 된다:
+
+```bash
+kubectl apply -f deploy/examples/editor-rbac.yaml
+kubectl create token dashboard-editor -n istio-system --duration=24h
+```
 
 ## 라이선스
 

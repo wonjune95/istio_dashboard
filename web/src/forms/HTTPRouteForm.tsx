@@ -19,21 +19,21 @@ export function HTTPRouteForm({
   const apiGateways = gateways.filter((g) => g.type === 'gateway-api')
 
   return (
-    <div className="space-y-6 rounded border bg-white p-5 shadow-sm">
+    <div className="space-y-6 panel p-5 shadow-sm">
       {/* identity */}
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Name">
+        <Field label="Name" required>
           <input className={input} value={model.name} disabled={lockIdentity}
             onChange={(e) => set({ name: e.target.value })} />
         </Field>
-        <Field label="Namespace">
+        <Field label="Namespace" required>
           <input className={input} value={model.namespace} disabled={lockIdentity}
             onChange={(e) => set({ namespace: e.target.value })} />
         </Field>
       </div>
 
       {/* parentRefs */}
-      <Section title="Parent Gateways"
+      <Section title="Parent Gateways" required
         onAdd={() => set({ parentRefs: [...model.parentRefs, { name: apiGateways[0]?.name ?? '' }] })}>
         {model.parentRefs.map((p, i) => (
           <Row key={i} onRemove={() => set({ parentRefs: model.parentRefs.filter((_, j) => j !== i) })}>
@@ -58,7 +58,7 @@ export function HTTPRouteForm({
       </Section>
 
       {/* rules */}
-      <Section title="Rules"
+      <Section title="Rules" required
         onAdd={() => set({ rules: [...model.rules, { pathType: 'PathPrefix', pathValue: '/', backendRefs: [{ name: '', port: 80 }] }] })}>
         {model.rules.map((rule, ri) => (
           <RuleCard key={ri} rule={rule} services={services}
@@ -80,9 +80,9 @@ function RuleCard({
 }) {
   const weightSum = rule.backendRefs.reduce((s, b) => s + (b.weight ?? 0), 0)
   return (
-    <div className="rounded border border-gray-200 p-3">
+    <div className="rounded border border-base p-3">
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-xs text-gray-500">Path</span>
+        <span className="text-xs text-muted">Path<span className="text-red-500">*</span></span>
         <select className={input} value={rule.pathType}
           onChange={(e) => onChange({ ...rule, pathType: e.target.value as RuleModel['pathType'] })}>
           <option value="PathPrefix">PathPrefix</option>
@@ -90,14 +90,16 @@ function RuleCard({
         </select>
         <input className={input} value={rule.pathValue} placeholder="/"
           onChange={(e) => onChange({ ...rule, pathValue: e.target.value })} />
-        <button onClick={onRemove} className="ml-auto text-sm text-red-600 hover:underline">규칙 삭제</button>
+        <button onClick={onRemove} className="ml-auto text-sm text-red-600 hover:underline dark:text-red-400">규칙 삭제</button>
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-500">Backends (service / port / weight)</span>
+          <span className="text-xs text-muted">
+            Backends (service<span className="text-red-500">*</span> / port<span className="text-red-500">*</span> / weight<span className="text-faint"> 선택</span>)
+          </span>
           {rule.backendRefs.length > 1 && (
-            <span className="text-xs text-gray-400">weight 합계: {weightSum}</span>
+            <span className="text-xs text-faint">weight 합계: {weightSum}</span>
           )}
         </div>
         {rule.backendRefs.map((b, bi) => (
@@ -107,7 +109,7 @@ function RuleCard({
         ))}
         <button
           onClick={() => onChange({ ...rule, backendRefs: [...rule.backendRefs, { name: '', port: 80 }] })}
-          className="text-sm text-blue-600 hover:underline">+ backend</button>
+          className="text-sm text-accent hover:underline">+ backend</button>
       </div>
     </div>
   )
@@ -132,38 +134,45 @@ function BackendRow({
         </datalist>
       </div>
       {b.name !== '' && !known && (
-        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700" title="이 네임스페이스에 없는 서비스">⚠ 없음</span>
+        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700 dark:bg-amber-500/15 dark:text-amber-300" title="이 네임스페이스에 없는 서비스">⚠ 없음</span>
       )}
       <input className={`${input} w-24`} type="number" value={b.port} placeholder="port"
         onChange={(e) => onChange({ ...b, port: Number(e.target.value) })} />
       <input className={`${input} w-24`} type="number" value={b.weight ?? ''} placeholder="weight"
         onChange={(e) => onChange({ ...b, weight: e.target.value === '' ? undefined : Number(e.target.value) })} />
-      <button onClick={onRemove} className="text-sm text-red-600 hover:underline">×</button>
+      <button onClick={onRemove} className="text-sm text-red-600 hover:underline dark:text-red-400">×</button>
     </div>
   )
 }
 
-const input = 'rounded border bg-white px-2 py-1 text-sm w-full disabled:bg-gray-100'
+const input = 'input-base disabled:bg-gray-100 dark:disabled:bg-slate-800'
 
 function replace<T>(arr: T[], i: number, v: T): T[] {
   return arr.map((x, j) => (j === i ? v : x))
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+// Same required convention as the auto-form's FieldTemplate: red * vs (선택).
+function RequiredMark({ required }: { required?: boolean }) {
+  return required
+    ? <span className="ml-1 text-red-500" title="필수">*</span>
+    : <span className="ml-1 text-[10px] font-normal text-faint">(선택)</span>
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium text-gray-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium text-muted">{label}<RequiredMark required={required} /></span>
       {children}
     </label>
   )
 }
 
-function Section({ title, onAdd, children }: { title: string; onAdd: () => void; children: React.ReactNode }) {
+function Section({ title, required, onAdd, children }: { title: string; required?: boolean; onAdd: () => void; children: React.ReactNode }) {
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
-        <button onClick={onAdd} className="text-sm text-blue-600 hover:underline">+ 추가</button>
+        <h3 className="text-sm font-semibold text-strong">{title}<RequiredMark required={required} /></h3>
+        <button onClick={onAdd} className="text-sm text-accent hover:underline">+ 추가</button>
       </div>
       <div className="space-y-2">{children}</div>
     </div>
@@ -174,7 +183,7 @@ function Row({ children, onRemove }: { children: React.ReactNode; onRemove: () =
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1">{children}</div>
-      <button onClick={onRemove} className="text-sm text-red-600 hover:underline">×</button>
+      <button onClick={onRemove} className="text-sm text-red-600 hover:underline dark:text-red-400">×</button>
     </div>
   )
 }

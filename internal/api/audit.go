@@ -7,28 +7,6 @@ import (
 	"istio-dashboard/internal/k8s"
 )
 
-// audit emits a structured record for every mutation, tagged with the user
-// identity (DESIGN.md §5). dry-run calls are validation, not mutations, so they
-// are not audited.
-func (s *Server) audit(ctx context.Context, verb, kind, ns, name string, dryRun bool, err error) {
-	if dryRun {
-		return
-	}
-	attrs := []any{
-		slog.Bool("audit", true),
-		slog.String("user", identityFrom(ctx).User()),
-		slog.String("verb", verb),
-		slog.String("kind", kind),
-		slog.String("namespace", ns),
-		slog.String("name", name),
-	}
-	if err != nil {
-		slog.Error("route mutation failed", append(attrs, slog.String("err", err.Error()))...)
-		return
-	}
-	slog.Info("route mutated", attrs...)
-}
-
 // auditResource audits a generic-engine mutation, flagging high-risk kinds so
 // monitoring can alert on them (Gemini review ⑦).
 func (s *Server) auditResource(ctx context.Context, verb, typeID, ns, name string, dryRun bool, err error) {

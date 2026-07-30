@@ -1,16 +1,13 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useCapabilities } from '../api/capabilities'
-import { useNamespaces } from '../api/namespaces'
-import { useNamespace } from '../ui/namespace'
+import { clearToken, getToken } from '../auth/token'
 import { useTheme } from '../ui/theme'
 import { Icon } from './icons'
 import { Sidebar } from './Sidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
   const { data } = useCapabilities()
-  const namespaces = useNamespaces()
-  const { ns, setNs } = useNamespace()
   const { theme, toggle } = useTheme()
 
   return (
@@ -21,25 +18,24 @@ export function Layout({ children }: { children: ReactNode }) {
           <h1 className="text-base font-semibold tracking-tight text-strong">Istio Dashboard</h1>
         </Link>
 
-        {/* center: global namespace selector */}
-        <div className="mx-auto flex items-center gap-2">
-          <span className="text-xs text-muted">Namespace</span>
-          <select
-            value={ns}
-            onChange={(e) => setNs(e.target.value)}
-            className="input-base w-44 py-1"
-            title="전역 네임스페이스 — 목록·개수에 적용"
-          >
-            <option value="">전체 네임스페이스</option>
-            {(namespaces.data ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2 text-xs">
+        {/* no global namespace selector — Overview/ResourceList carry their own
+            (they share the same persisted state, so the header one was redundant) */}
+        <div className="ml-auto flex items-center gap-2 text-xs">
           {data?.devMode ? (
             <span className="chip bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">dev mode</span>
           ) : (
-            data?.user && <span className="chip bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-slate-300">{data.user}</span>
+            <>
+              {data?.user && <span className="chip bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-slate-300">{data.user}</span>}
+              {getToken() && (
+                <button
+                  onClick={() => { clearToken(); window.location.reload() }}
+                  title="토큰 재설정"
+                  className="flex h-8 w-8 items-center justify-center rounded-md border border-base text-muted hover:text-strong"
+                >
+                  <Icon name="logout" className="h-4 w-4" />
+                </button>
+              )}
+            </>
           )}
           <button
             onClick={toggle}

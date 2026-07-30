@@ -4,7 +4,8 @@ import { useReferenceOptions, type RefKind } from '../api/references'
 
 const UNKNOWN_HINT: Record<RefKind, string> = {
   service: '등록된 서비스 아님 — 외부/다른 NS 호스트면 정상',
-  gateway: '이 네임스페이스에 없는 Gateway',
+  gateway: '클러스터에 없는 Gateway',
+  gatewayName: '클러스터에 없는 Gateway 이름',
   subset: '정의된 subset 아님 — 적용 시 무시될 수 있음',
 }
 

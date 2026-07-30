@@ -21,25 +21,34 @@ type capabilities struct {
 }
 
 // handleCapabilities reports CRD availability (via SA discovery) plus per-user
-// identity and namespace-list permission (via the user's token).
+// identity and namespace-list permission (via the user's token). CRD info alone
+// never authenticates the user, so the SSAR below doubles as the token check:
+// if Kubernetes rejects the token we answer 401 — otherwise an invalid token
+// would pass the login gate into a UI where every later call fails.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	crd, err := s.factory.DetectCRDs()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Internal", err.Error())
 		return
 	}
+	nsAllowed, err := s.canListNamespaces(r.Context())
+	if apierrors.IsUnauthorized(err) {
+		writeK8sError(w, err)
+		return
+	}
+	// Other SSAR errors (transient, RBAC on SSAR itself) degrade to "not allowed".
 	writeJSON(w, http.StatusOK, capabilities{
 		HTTPRouteInstalled:      crd.HTTPRoute,
 		VirtualServiceInstalled: crd.VirtualService,
 		GatewayAPIVersion:       crd.GatewayAPIVersion,
 		IstioAPIVersion:         crd.IstioAPIVersion,
-		NamespaceListAllowed:    s.canListNamespaces(r.Context()),
+		NamespaceListAllowed:    nsAllowed,
 		DevMode:                 s.dev,
 		User:                    identityFrom(r.Context()).User(),
 	})
 }
 
-func (s *Server) canListNamespaces(ctx context.Context) bool {
+func (s *Server) canListNamespaces(ctx context.Context) (bool, error) {
 	review := &authzv1.SelfSubjectAccessReview{
 		Spec: authzv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "list", Resource: "namespaces"},
@@ -47,7 +56,10 @@ func (s *Server) canListNamespaces(ctx context.Context) bool {
 	}
 	res, err := clientFrom(ctx).Kube.AuthorizationV1().
 		SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
-	return err == nil && res.Status.Allowed
+	if err != nil {
+		return false, err
+	}
+	return res.Status.Allowed, nil
 }
 
 // handleAccess runs SelfSubjectAccessReviews (with the user's token) for the
@@ -89,9 +101,11 @@ func (s *Server) handleAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleResourceTypes returns the curated resource registry with install state
-// and discovered version (drives the UI category/kind navigation).
+// and discovered version (drives the UI category/kind navigation). It reads the
+// same cached snapshot ResolveType uses, so the listing and the CRUD path never
+// disagree about what is installed.
 func (s *Server) handleResourceTypes(w http.ResponseWriter, _ *http.Request) {
-	cat, err := s.factory.Catalog()
+	cat, err := s.factory.CatalogCached()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Internal", err.Error())
 		return

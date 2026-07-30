@@ -15,8 +15,16 @@ spec:
         {{- include "istio-dashboard.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "istio-dashboard.fullname" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
         runAsNonRoot: true
+        # distroless "nonroot" is a named user; kubelet needs the numeric uid to
+        # verify runAsNonRoot at admission time.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:

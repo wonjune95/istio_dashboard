@@ -29,10 +29,10 @@ func (f *ClientFactory) SpecSchema(typeID string) (json.RawMessage, error) {
 
 	f.schemaMu.Lock()
 	defer f.schemaMu.Unlock()
-	if f.schemaCxe == nil {
-		f.schemaCxe = map[string]json.RawMessage{}
+	if f.schemaCache == nil {
+		f.schemaCache = map[string]json.RawMessage{}
 	}
-	if s, ok := f.schemaCxe[typeID]; ok {
+	if s, ok := f.schemaCache[typeID]; ok {
 		return s, nil
 	}
 
@@ -60,7 +60,7 @@ func (f *ClientFactory) SpecSchema(typeID string) (json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		f.schemaCxe[typeID] = raw
+		f.schemaCache[typeID] = raw
 		return raw, nil
 	}
 	return nil, fmt.Errorf("crd %s: version %s not found", typeID, rt.Version)

@@ -1,20 +1,32 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 
 	"istio-dashboard/internal/auth"
 	"istio-dashboard/internal/k8s"
 )
 
+// ClientSource is the k8s.ClientFactory surface the handlers depend on,
+// abstracted so tests can substitute fakes.
+type ClientSource interface {
+	ForToken(bearerToken string) (*k8s.Clients, error)
+	ResolveType(typeID string) (k8s.ResolvedType, error)
+	CatalogCached() ([]k8s.ResolvedType, error)
+	DetectCRDs() (k8s.CRDInfo, error)
+	SpecSchema(typeID string) (json.RawMessage, error)
+}
+
 // Server holds injected dependencies and exposes the JSON API handlers.
 type Server struct {
 	dev      bool
-	factory  *k8s.ClientFactory
+	factory  ClientSource
 	verifier auth.Verifier
 }
 
-func NewServer(dev bool, factory *k8s.ClientFactory, verifier auth.Verifier) *Server {
+func NewServer(dev bool, factory ClientSource, verifier auth.Verifier) *Server {
 	return &Server{dev: dev, factory: factory, verifier: verifier}
 }
 
@@ -53,7 +65,11 @@ func (s *Server) withK8s(next http.Handler) http.Handler {
 		}
 		client, err := s.factory.ForToken(token)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Internal", err.Error())
+			if errors.Is(err, k8s.ErrTokenRequired) {
+				writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "Internal", err.Error())
+			}
 			return
 		}
 		ctx := withIdentity(withClient(r.Context(), client), id)

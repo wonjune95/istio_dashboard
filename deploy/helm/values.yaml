@@ -3,7 +3,11 @@ image:
   tag: dev
   pullPolicy: IfNotPresent
 
-replicaCount: 2
+# e.g. [{name: regcred}] for a private registry.
+imagePullSecrets: []
+
+# 앱이 무상태라 HA가 필요하면 그냥 올리면 된다 (2+ = 무중단 롤아웃).
+replicaCount: 1
 
 service:
   type: ClusterIP

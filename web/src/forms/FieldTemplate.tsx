@@ -7,7 +7,8 @@ import type { FieldTemplateProps } from '@rjsf/utils'
 //   - object fields → label lives in the collapsible <summary>, so skip it,
 //   - array items (id ending in _<index>) → no per-item label.
 export function FieldTemplate(props: FieldTemplateProps) {
-  const { id, label, required, children, help, errors, hidden, schema } = props
+  const { id, label, required, children, help, errors, hidden, schema, uiSchema } = props
+  const recommended = (uiSchema?.['ui:options'] as { recommended?: boolean } | undefined)?.recommended
 
   if (hidden) return <div className="hidden">{children}</div>
 
@@ -26,6 +27,8 @@ export function FieldTemplate(props: FieldTemplateProps) {
       {label}
       {required ? (
         <span className="text-red-500" title="필수">*</span>
+      ) : recommended ? (
+        <span className="text-[10px] font-normal text-amber-600 dark:text-amber-400" title="API상 선택이지만 채우기를 권장">(권장)</span>
       ) : (
         <span className="text-[10px] font-normal text-faint">(선택)</span>
       )}

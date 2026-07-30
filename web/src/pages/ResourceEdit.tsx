@@ -329,7 +329,7 @@ export function ResourceEdit() {
         )}
         {tab === 'form' && formAvailable && (
           <span className="ml-auto self-center pb-1 text-xs text-faint">
-            <span className="text-red-500">*</span> 필수 · (선택) 부가
+            <span className="text-red-500">*</span> 필수 · <span className="text-amber-600 dark:text-amber-400">(권장)</span> 채우면 좋음 · (선택) 부가
           </span>
         )}
       </div>
