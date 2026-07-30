@@ -6,7 +6,7 @@
 ![React](https://img.shields.io/badge/React-18%20%2B%20TS-61DAFB?logo=react&logoColor=black)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-> Istio · Gateway API 라우팅/보안/텔레메트리 설정을 **사용자 본인 권한으로** 보고·만들고·고치는 단일 바이너리 웹 콘솔. Kong Manager / APISIX Dashboard의 Istio 판.
+> Istio · Gateway API 라우팅/보안/텔레메트리 설정을 **사용자 본인 권한으로** 보고·만들고·고치는 단일 바이너리 웹 콘솔.
 
 ![대시보드 홈 화면](docs/screenshot.png)
 
