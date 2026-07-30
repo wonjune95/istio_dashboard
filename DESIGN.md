@@ -61,7 +61,7 @@ Istio 라우팅(Gateway API `HTTPRoute` + Istio `VirtualService`)을 폼/YAML로
 
 **개발 vs 프로덕션 빌드**
 - dev: Vite :5173(HMR) → `/api` 프록시 → Go :8080(`--dev`). 
-- prod: `npm run build`(Vite `build.outDir = ../internal/assets/dist`) → `go build`가 `internal/assets`에서 embed → 바이너리 하나. CI 한 줄(`make build`). *(embed는 .go 파일 기준 상대경로라 dist는 embed 패키지 옆에 위치)*
+- prod: `npm run build`(Vite `build.outDir = ../internal/assets/dist`) → `go build`가 `internal/assets`에서 embed → 바이너리 하나 (Dockerfile 멀티스테이지가 이 두 단계를 수행). *(embed는 .go 파일 기준 상대경로라 dist는 embed 패키지 옆에 위치)*
 
 ---
 

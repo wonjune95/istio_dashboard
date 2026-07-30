@@ -88,34 +88,35 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 
 ---
 
-## 빠른 시작
+## 빠른 시작 (Kubernetes 배포)
 
-### 사전 요구사항
-- Go 1.26+, Node.js 20+
-- 접근 가능한 Kubernetes 클러스터 + `kubectl` 컨텍스트 (dev는 docker-desktop/kind로 충분)
+이 프로젝트는 클러스터 안에서 돌리는 게 기본이다. 빌드 도구 없이 Docker와 Helm만 있으면 된다(이미지 빌드가 멀티스테이지라 Go/Node 로컬 설치 불필요).
 
-### 로컬 개발
+### 1) 이미지 빌드 & 푸시
 ```bash
-# 백엔드: 로컬 kubeconfig 사용, :8080
-make run                 # = go run ./cmd/server --dev
-
-# 프론트엔드 HMR: 별도 터미널, Vite :5173 → /api 프록시 → :8080
-make dev-web
+docker build -t <registry>/istio-dashboard:<tag> .
+docker push <registry>/istio-dashboard:<tag>
 ```
 
-### 프로덕션 빌드 (단일 바이너리)
+### 2) Helm 설치
 ```bash
-make build               # web 빌드 → internal/assets/dist 임베드 → bin/server
-./bin/server --addr :8080
-```
-
-### 컨테이너 · Helm
-```bash
-make docker              # 멀티스테이지(node→go→distroless), non-root 이미지
 helm install istio-dashboard ./deploy/helm -n istio-system \
   --set image.repository=<registry>/istio-dashboard --set image.tag=<tag>
 ```
-주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`, `oidc.issuer`/`oidc.audience`. 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다. 외부 노출은 클러스터의 Gateway에 HTTPRoute 하나 붙이면 된다.
+주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`(무상태라 늘리면 그대로 HA), `oidc.issuer`/`oidc.audience`. 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다.
+
+### 3) 노출 — 클러스터의 Gateway에 HTTPRoute 부착
+```bash
+# parentRefs·hostname을 환경에 맞게 수정 후
+kubectl apply -f deploy/examples/httproute.yaml
+```
+
+### 4) 접속 토큰 발급 → 로그인
+```bash
+kubectl apply -f deploy/examples/editor-rbac.yaml     # 편집자 역할 예시
+kubectl create token dashboard-editor -n istio-system --duration=24h
+```
+발급된 토큰을 브라우저 로그인 화면(TokenGate)에 붙여넣으면 끝. 권한 범위는 [RBAC](#rbac) 섹션 참고.
 
 ---
 
@@ -160,8 +161,8 @@ istio_dashboard/
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
 ├─ deploy/
 │  ├─ helm/                    # Chart: deployment / service / rbac / values
-│  └─ examples/                # editor-rbac.yaml — 사용자용 편집자 ClusterRole 예시
-├─ Dockerfile  Makefile  go.mod
+│  └─ examples/                # editor-rbac.yaml(편집자 역할) · httproute.yaml(노출 예시)
+├─ Dockerfile  go.mod
 ```
 
 ## 기술 스택
@@ -171,10 +172,18 @@ istio_dashboard/
 
 ## 개발
 
+로컬 개발·테스트용 (배포에는 필요 없다 — 배포는 위 Docker+Helm 경로). 요구사항: Go 1.26+, Node.js 20+, kubectl 컨텍스트(kind/docker-desktop이면 충분).
+
 ```bash
-make test    # go test ./...  (인증 경계·레지스트리 캐시·쓰기 가드·감사 로그 등 단위 테스트, fake client 기반)
-make vet     # go vet ./...
-make tidy    # go mod tidy
+go run ./cmd/server --dev          # 백엔드 :8080, 로컬 kubeconfig 사용 (인클러스터에선 부팅 거부)
+cd web && npm run dev              # 프론트 HMR: Vite :5173 → /api 프록시 → :8080
+
+go test ./...                      # 단위 테스트 (인증 경계·레지스트리 캐시·쓰기 가드·감사 로그, fake client 기반)
+go vet ./...
+
+# 컨테이너 없이 단일 바이너리로 구동할 때
+cd web && npm ci && npm run build  # 프론트 빌드 → internal/assets/dist
+CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 ```
 
 ## RBAC
