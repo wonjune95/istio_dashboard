@@ -55,6 +55,8 @@ func main() {
 	}
 	srv := api.NewServer(*dev, factory, auth.NewStore(accountsDir), auth.NewSessions(os.Getenv("SESSION_SECRET")),
 		api.AccountsCMRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("ACCOUNTS_CONFIGMAP")})
+	// ArgoCD처럼: admin 계정이 없으면 초기 비밀번호를 생성해 Secret에 남긴다.
+	srv.EnsureInitialAdmin(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

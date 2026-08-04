@@ -357,3 +357,40 @@ func TestPasswordChange_RoundTrip(t *testing.T) {
 		t.Error("patched hash does not verify the new password")
 	}
 }
+
+// Fresh install: no accounts CM → EnsureInitialAdmin creates it with an admin
+// entry and stores the plaintext initial password in the well-known Secret.
+func TestEnsureInitialAdmin_FreshInstall(t *testing.T) {
+	kube := kubefake.NewClientset()
+	s := NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"})
+
+	s.EnsureInitialAdmin(context.Background())
+
+	cm, err := kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("accounts CM not created: %v", err)
+	}
+	role, hash, _ := strings.Cut(cm.Data["admin"], ":")
+	if role != "admin" {
+		t.Fatalf("admin entry = %q, want admin role", cm.Data["admin"])
+	}
+	sec, err := kube.CoreV1().Secrets("ns1").Get(context.Background(), InitialAdminSecret, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("initial secret not created: %v", err)
+	}
+	pw := sec.StringData["password"]
+	if pw == "" {
+		pw = string(sec.Data["password"])
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) != nil {
+		t.Error("secret password does not match the CM hash")
+	}
+
+	// 이미 admin이 있으면 아무것도 바꾸지 않는다.
+	s.EnsureInitialAdmin(context.Background())
+	cm2, _ := kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
+	if cm2.Data["admin"] != cm.Data["admin"] {
+		t.Error("second run must not rotate the admin password")
+	}
+}

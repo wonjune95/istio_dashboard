@@ -6,7 +6,7 @@
 ![React](https://img.shields.io/badge/React-18%20%2B%20TS-61DAFB?logo=react&logoColor=black)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
-> Istio · Gateway API 라우팅/보안/텔레메트리 설정을 **사용자 본인 권한으로** 보고·만들고·고치는 단일 바이너리 웹 콘솔.
+> Istio · Gateway API 라우팅/보안/텔레메트리 설정을 **계정·역할 기반으로 안전하게** 보고·만들고·고치는 단일 바이너리 웹 콘솔.
 
 ![대시보드 홈 화면](docs/screenshot.png)
 
@@ -14,9 +14,9 @@
 
 ## 요약 (TL;DR)
 
-- **Zero-Trust 보안** — 자체 DB·세션·관리자 토큰 없음. 요청의 Bearer 토큰을 그대로 Kubernetes API에 패스스루하고 **인가는 전적으로 K8s RBAC에 위임**한다. 대시보드는 권한 판단을 하지 않는다(403은 클러스터가 준다).
-- **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다.
-- **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 세션 상태가 없어 N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
+- **ArgoCD 방식 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 비밀번호를 자동 생성해 Secret에 남긴다** (ArgoCD의 initial-admin-secret과 동일한 UX).
+- **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다. 대시보드를 거친 모든 변경은 홈의 **변경 히스토리**에 계정명과 함께 기록된다.
+- **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 서버가 세션 저장소를 갖지 않아(서명 쿠키) N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
 - **제네릭 리소스 엔진** — 특정 CRD에 종속되지 않는 dynamic client 기반. Istio 12종 + Gateway API 7종을 하나의 CRUD 파이프라인으로 다룬다.
 
 ---
@@ -38,18 +38,21 @@ sequenceDiagram
     participant Dash as 대시보드 (Go 단일 바이너리)
     participant K8s as Kubernetes API Server
 
-    User->>Dash: /api 요청 + Authorization: Bearer <user token>
-    Note over Dash: (선택) OIDC 검증 → identity 추출<br/>토큰을 보관하지 않음
-    Dash->>K8s: 사용자 토큰으로 rest.Config 생성 후 호출
-    Note over K8s: RBAC가 사용자 단위로 인가
-    K8s-->>Dash: 리소스 또는 403 Forbidden
-    Dash-->>User: JSON 응답 (403이면 UI가 읽기전용 전환)
+    User->>Dash: POST /api/login (아이디·비밀번호)
+    Note over Dash: 계정 ConfigMap의 bcrypt 해시 검증<br/>→ HMAC 서명 세션 쿠키 발급 (HttpOnly, 12h)
+    User->>Dash: /api 요청 (세션 쿠키)
+    Note over Dash: 역할 게이트: viewer는 모든 변경 403
+    Dash->>K8s: ServiceAccount 단일 신원으로 호출
+    K8s-->>Dash: 리소스
+    Dash-->>User: JSON 응답 (viewer면 UI도 읽기전용)
 ```
 
-- **Bearer 토큰 패스스루** — 백엔드는 사용자 토큰을 저장·가공하지 않고 요청마다 K8s 클라이언트 생성에 그대로 주입한다. 모든 읽기·쓰기가 사용자 본인으로 수행되며, 인가는 클러스터 RBAC가 판단한다. 대시보드에 권한 우회 표면이 존재하지 않는다.
-- **OIDC 검증은 얇은 선택 레이어** — issuer/audience를 검증해 조기 401 + 감사용 identity를 뽑는다. 끄면(`OIDC_ISSUER` 미설정) 검증을 건너뛰되 패스스루는 그대로라, 비-OIDC 환경(SA 토큰)이나 dev(로컬 kubeconfig)에서도 코드 변경 없이 동작한다.
-- **브라우저 로그인** — 토큰 없이 접속하면 401과 함께 토큰 입력 화면(TokenGate)이 뜬다. 입력된 토큰은 `sessionStorage`에만 보관되고(서버 무저장) 모든 API 호출의 Bearer로 실린다. 유효하지 않은 토큰은 첫 화면에서 걸러진다 — `/api/capabilities`가 SelfSubjectAccessReview로 토큰을 검증해 401을 돌려주므로, 깨진 토큰으로 로그인 게이트를 통과하는 일이 없다. 헤더의 로그아웃 버튼으로 토큰을 지운다.
-- **무상태 HA** — 세션이 토큰에만 있으므로 스티키 세션·공유 캐시가 필요 없다.
+- **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 계정 추가/삭제/역할 변경은 `kubectl edit`이면 끝이고, 마운트 동기화로 **재시작 없이 1분 내 반영**된다. 헬름이 이 CM을 관리하지 않아 upgrade에도 계정이 유지된다.
+- **초기 admin 자동 생성** — 부팅 시 admin 계정이 없으면 랜덤 비밀번호를 만들어 해시는 CM에, 평문은 `istio-dashboard-initial-admin-secret` Secret에 저장한다. 첫 로그인 후 설정 페이지에서 비밀번호를 바꾸면 Secret은 지워도 된다.
+- **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
+- **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
+- **세션은 서명 쿠키** — 서버 저장소가 없어 무상태 HA 그대로. `SESSION_SECRET` 미설정 시 부팅마다 랜덤 키(재시작 = 재로그인).
+- **하드닝** — CSP(`default-src 'self'`) 등 보안 헤더, HttpOnly 쿠키, distroless non-root, readOnlyRootFilesystem.
 - **에어갭** — 프론트 번들을 바이너리에 인라인. 런타임 외부 의존 0.
 
 ---
@@ -72,8 +75,9 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 3. **409 충돌 제어** — `resourceVersion` 불일치 시 무조건 덮어쓰지 않고, *내 수정본 vs 서버 최신본* diff를 띄워 사용자가 덮어쓸지 결정하게 한다.
 4. **고위험 확인** — 파급이 큰 kind는 리소스 이름을 직접 입력해야 삭제/수정이 진행된다.
 
-### SSAR 권한 인식 UI
-`SelfSubjectAccessReview`로 수정/삭제 권한을 미리 확인해, 권한이 없으면 폼을 **읽기전용**으로 전환한다. 불필요한 403 실패 요청을 UI 단계에서 차단한다.
+### 역할 인식 UI + 변경 히스토리
+- 로그인 계정의 역할을 미리 확인해, viewer면 폼과 적용/삭제 버튼을 **읽기전용**으로 전환한다. 서버도 같은 규칙으로 모든 변경을 403 처리하므로 UI 우회가 불가능하다.
+- 홈의 **변경 히스토리** 패널에 대시보드를 거친 생성/수정/삭제가 계정명·시각과 함께 남는다(서버 인메모리 최근 200건 — 재시작 시 초기화, 영구 기록은 구조화 감사 로그). 홈 카드에는 istiod 컨트롤플레인 실제 버전(예: `1.30.2`)도 표시된다.
 
 ### 스키마 자동 폼 + YAML 이중 편집
 - `react-jsonschema-form`이 CRD OpenAPI 스키마를 읽어 입력 폼을 자동 생성 — YAML을 몰라도 안전하게 편집.
@@ -82,7 +86,7 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 - 폼 ↔ YAML 상호 동기화. 폼이 표현 못 하는 고급 필드가 있으면 폼 탭을 잠그고 "YAML 전용"으로 안내 → 필드 유실 방지.
 
 ### UI
-다크 기본의 고밀도 콘솔. 액센트 색은 CSS 변수 한 곳(`--accent`)에서 관리되어 한 줄 수정으로 리스킨된다. 라이트/다크 토글 지원.
+라이트 기본의 고밀도 콘솔(다크 토글 지원). 액센트 색은 CSS 변수 한 곳(`--accent`)에서 관리되어 한 줄 수정으로 리스킨된다. YAML 에디터에는 들여쓰기 가이드라인이 표시되어 인덴트 실수를 눈으로 잡을 수 있다.
 
 ![리소스 편집 폼](docs/screenshot-form.png)
 
@@ -103,7 +107,7 @@ docker push <registry>/istio-dashboard:<tag>
 helm install istio-dashboard ./deploy/helm -n istio-system \
   --set image.repository=<registry>/istio-dashboard --set image.tag=<tag>
 ```
-주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`(무상태라 늘리면 그대로 HA), `oidc.issuer`/`oidc.audience`. 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다.
+주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`(무상태라 늘리면 그대로 HA), `accountsConfigMap`(계정 ConfigMap 이름). 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다.
 
 ### 3) 노출 — 클러스터의 Gateway에 HTTPRoute 부착
 ```bash
@@ -111,12 +115,24 @@ helm install istio-dashboard ./deploy/helm -n istio-system \
 kubectl apply -f deploy/examples/httproute.yaml
 ```
 
-### 4) 접속 토큰 발급 → 로그인
+### 4) 초기 admin 비밀번호 조회 → 로그인
+첫 부팅 때 admin 계정과 초기 비밀번호가 자동 생성된다 (ArgoCD와 동일한 방식):
 ```bash
-kubectl apply -f deploy/examples/editor-rbac.yaml     # 편집자 역할 예시
-kubectl create token dashboard-editor -n istio-system --duration=24h
+kubectl -n istio-system get secret istio-dashboard-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d
 ```
-발급된 토큰을 브라우저 로그인 화면(TokenGate)에 붙여넣으면 끝. 권한 범위는 [RBAC](#rbac) 섹션 참고.
+`admin` + 위 비밀번호로 로그인 → 설정 페이지(헤더의 사용자 칩)에서 비밀번호 변경. 변경 후 Secret은 지워도 된다.
+
+![로그인 화면](docs/screenshot-login.png)
+
+### 5) 계정 추가
+```bash
+go run ./hack/bcrypt-hash.go '비밀번호'                      # bcrypt 해시 생성
+# (Go가 없으면) htpasswd -bnBC 10 "" '비밀번호' | tr -d ':\n'
+kubectl -n istio-system edit configmap istio-dashboard-accounts
+# data에 추가:  사용자명: "역할:해시"   (역할: admin | editor | viewer)
+```
+재시작 불필요 — 마운트 동기화로 1분 내 반영된다. 예시는 `deploy/examples/accounts-configmap.yaml` 참고.
 
 ---
 
@@ -125,10 +141,11 @@ kubectl create token dashboard-editor -n istio-system --duration=24h
 | 플래그 / 환경변수 | 기본값 | 설명 |
 |---|---|---|
 | `--addr` | `:8080` | 리슨 주소 |
-| `--dev` | `false` | OIDC 생략 + 로컬 kubeconfig 사용 (**인클러스터 감지 시 부팅 거부**) |
+| `--dev` | `false` | 로그인 생략 + 로컬 kubeconfig 사용 (**인클러스터 감지 시 부팅 거부**) |
 | `--kubeconfig` | (기본 로딩 규칙) | dev 전용 kubeconfig 경로 |
-| `OIDC_ISSUER` | (없음) | 설정 시 Bearer 토큰의 issuer 검증. 비우면 검증 생략(RBAC는 그대로 인가) |
-| `OIDC_AUDIENCE` | (없음) | 토큰 audience 검증값 |
+| `ACCOUNTS_DIR` | `/etc/istio-dashboard/accounts` | 계정 ConfigMap 마운트 경로 |
+| `ACCOUNTS_CONFIGMAP` / `POD_NAMESPACE` | (헬름이 주입) | 비밀번호 변경·초기 admin 생성이 patch할 CM 위치 |
+| `SESSION_SECRET` | (없음) | 세션 쿠키 서명 키. 비우면 부팅마다 랜덤(재시작 = 재로그인) |
 
 프로브: `/healthz` (live) · `/readyz` (ready) · `/metrics` (Prometheus). 로그는 `slog` JSON 구조화(요청 로그 + 쓰기 감사 로그).
 
@@ -139,11 +156,14 @@ kubectl create token dashboard-editor -n istio-system --duration=24h
 ### 왜 kind 전용 구조 대신 제네릭 엔진인가
 초기 설계는 `HTTPRoute`/`VirtualService` 두 kind에 전용 provider를 두는 방식이었다. 하지만 Istio·Gateway API는 kind가 20종에 달하고 CRD 버전이 계속 바뀐다. 전용 모델을 kind마다 만들면 관리 비용이 선형으로 늘고 CRD 버전 변화에 취약하다. → **dynamic client + CRD OpenAPI 스키마 자동 폼**으로 전환해, kind 추가가 레지스트리 한 줄로 끝나고 스키마 변화에 자동 적응하도록 했다. 대신 kind별 curated 폼이 필요한 소수(예: VirtualService)는 선택적으로 얹을 수 있게 남겨뒀다.
 
+### 왜 토큰 패스스루에서 ArgoCD 방식으로 바꿨나
+초기 구현은 사용자의 K8s Bearer 토큰을 그대로 패스스루해 클러스터 RBAC로 인가했다 — 권한 모델은 정확했지만, 사용자마다 토큰을 발급·전달·갱신해야 하는 운영 부담이 컸고 로그인 UX도 나빴다. → ArgoCD처럼 **앱 자체 계정(ConfigMap) + 역할**로 전환하고 클러스터 작업은 SA 단일 신원으로 통일했다. K8s 감사 로그에 사용자 대신 SA가 찍히는 단점은 대시보드 자체의 변경 히스토리(계정명 기록)로 상쇄한다. 사용자별 K8s RBAC 일치가 꼭 필요해지면 Impersonation 방식으로 확장할 수 있다.
+
 ### 왜 실시간 SSE 스트림을 넣지 않았나
-설계 단계에선 사용자별 watch → SSE 실시간 동기화를 계획했다. 그러나 **무상태 HA를 지키려면** 공유 informer 캐시를 못 쓰고(SA 캐시는 per-user 인가를 깨뜨린다) 연결마다 사용자 토큰 watch를 열어야 하는데, 이는 복제본 수 × 동접 수만큼 API 서버 watch 연결을 만든다. 사내 운영 도구(동접 수십, 변경 저빈도)라는 실제 사용 맥락에서 이 비용은 정당화되지 않았다. → 서버 무상태성을 그대로 지키는 쪽을 택하고, 클라이언트에 **세션 한정 활동 로그**(이 세션에서 내가 한 변경)와 수동 새로고침으로 수렴시켰다. *"있으면 좋은 실시간"보다 "깨지지 않는 무상태 HA"를 우선한 의도적 타협.*
+설계 단계에선 사용자별 watch → SSE 실시간 동기화를 계획했다. 그러나 **무상태 HA를 지키려면** 연결마다 watch를 열어야 하고, 이는 복제본 수 × 동접 수만큼 API 서버 watch 연결을 만든다. 사내 운영 도구(동접 수십, 변경 저빈도)라는 실제 사용 맥락에서 이 비용은 정당화되지 않았다. → 서버 무상태성을 그대로 지키는 쪽을 택하고, **서버 인메모리 변경 히스토리**(30초 주기 갱신)와 수동 새로고침으로 수렴시켰다. *"있으면 좋은 실시간"보다 "깨지지 않는 무상태 HA"를 우선한 의도적 타협.*
 
 ### 왜 `--dev` 부팅 가드레일인가
-`--dev`는 OIDC를 건너뛰고 로컬 kubeconfig를 쓴다 — 로컬에선 편하지만 운영 클러스터에서 켜지면 인증 우회가 된다. 그래서 모든 파드에 주입되는 `KUBERNETES_SERVICE_HOST`가 감지되면 `--dev` 플래그가 있을 때 **즉시 종료**한다(CrashLoopBackOff 유도). 실수로 dev 모드가 클러스터에 배포되는 사고를 구조적으로 차단한다.
+`--dev`는 로그인을 건너뛰고 로컬 kubeconfig를 쓴다 — 로컬에선 편하지만 운영 클러스터에서 켜지면 인증 우회가 된다. 그래서 모든 파드에 주입되는 `KUBERNETES_SERVICE_HOST`가 감지되면 `--dev` 플래그가 있을 때 **즉시 종료**한다(CrashLoopBackOff 유도). 실수로 dev 모드가 클러스터에 배포되는 사고를 구조적으로 차단한다.
 
 ---
 
@@ -153,15 +173,16 @@ kubectl create token dashboard-editor -n istio-system --duration=24h
 istio_dashboard/
 ├─ cmd/server/main.go          # 엔트리포인트: ServeMux, 프로브/metrics, graceful shutdown
 ├─ internal/
-│  ├─ api/                     # JSON 핸들러 (resources CRUD, capabilities, access(SSAR), 감사)
-│  ├─ auth/                    # OIDC 검증 + Bearer 추출 (dev 우회)
+│  ├─ api/                     # JSON 핸들러 (resources CRUD, login/계정, capabilities, 변경 히스토리)
+│  ├─ auth/                    # 로컬 계정(bcrypt) + HMAC 세션 (ArgoCD 방식)
 │  ├─ k8s/                     # dynamic client 팩토리, kind 레지스트리, discovery, 참조 조회
 │  ├─ assets/                  # 빌드된 React(dist) embed + SPA fallback
 │  └─ observability/           # slog 로깅, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
+├─ hack/bcrypt-hash.go         # 계정 비밀번호 해시 생성 헬퍼
 ├─ deploy/
 │  ├─ helm/                    # Chart: deployment / service / rbac / values
-│  └─ examples/                # editor-rbac.yaml(편집자 역할) · httproute.yaml(노출 예시)
+│  └─ examples/                # accounts-configmap.yaml(계정) · httproute.yaml(노출 예시)
 ├─ Dockerfile  go.mod
 ```
 
@@ -186,16 +207,16 @@ cd web && npm ci && npm run build  # 프론트 빌드 → internal/assets/dist
 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 ```
 
-## RBAC
+## 권한 모델
 
-대시보드 파드의 ServiceAccount는 **CRD discovery 최소 권한만** 갖는다. 실제 라우트 읽기/쓰기 권한은 **각 사용자의 K8s RBAC**로 부여한다 — 운영자는 viewer/editor ClusterRole을 사용자에게 바인딩한다(대상: `*.networking.istio.io`, `*.gateway.networking.k8s.io`, `namespaces`). 대시보드는 권한을 대행하지 않으므로, 누가 무엇을 바꿀 수 있는지는 클러스터 RBAC 정책 그대로다.
+ArgoCD와 같은 구조다 — 클러스터 권한과 사용자 권한을 분리한다:
 
-편집자 역할 예시가 `deploy/examples/editor-rbac.yaml`에 있다. 적용 후 토큰을 발급해 로그인 화면에 붙여넣으면 된다:
+| 층 | 담당 | 내용 |
+|---|---|---|
+| 클러스터 (K8s RBAC) | 파드 ServiceAccount | 관리 대상 CRD(`*.networking.istio.io`, `security/telemetry.istio.io`, `*.gateway.networking.k8s.io`) CRUD + namespaces/services 읽기 + 계정 CM patch. 헬름이 자동 구성. |
+| 사용자 (앱 역할) | 계정 ConfigMap | `admin`/`editor` = 변경 가능, `viewer` = 조회만. 서버가 모든 변경 요청을 역할로 게이트(403). |
 
-```bash
-kubectl apply -f deploy/examples/editor-rbac.yaml
-kubectl create token dashboard-editor -n istio-system --duration=24h
-```
+계정 관리는 전부 `istio-dashboard-accounts` ConfigMap에서 한다: 키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제. 본인 비밀번호는 각자 설정 페이지에서 변경한다.
 
 ## 라이선스
 
