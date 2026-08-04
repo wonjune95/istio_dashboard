@@ -16,12 +16,9 @@ service:
   type: ClusterIP
   port: 8080
 
-# OIDC: the cluster API server must trust this same issuer (token passthrough).
-# Leave issuer empty only for trusted/dev clusters — then the app does no token
-# verification (Kubernetes RBAC still authorizes).
-oidc:
-  issuer: ""
-  audience: ""
+# 로컬 계정 ConfigMap 이름 (헬름이 만들지 않음 — deploy/examples/accounts-configmap.yaml
+# 참고). 한 키 = 한 사용자, 값 = "role:bcryptHash" (role: admin|editor|viewer).
+accountsConfigMap: istio-dashboard-accounts
 
 resources:
   requests:

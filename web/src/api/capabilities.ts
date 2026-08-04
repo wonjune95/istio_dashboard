@@ -11,6 +11,7 @@ export interface Capabilities {
   namespaceListAllowed: boolean
   devMode: boolean
   user?: string
+  role?: string // admin | editor | viewer
 }
 
 export function useCapabilities() {

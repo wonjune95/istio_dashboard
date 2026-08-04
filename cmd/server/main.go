@@ -28,11 +28,11 @@ func main() {
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	// dev safety guard: --dev bypasses OIDC and uses a local kubeconfig, so it must
+	// dev safety guard: --dev bypasses login and uses a local kubeconfig, so it must
 	// never run in a cluster. KUBERNETES_SERVICE_HOST is injected into every pod;
 	// its presence means we are in-cluster — refuse to start to prevent auth bypass.
 	if *dev && os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
-		slog.Error("--dev refused: in-cluster environment detected (would bypass OIDC auth)")
+		slog.Error("--dev refused: in-cluster environment detected (would bypass login)")
 		os.Exit(1)
 	}
 
@@ -41,12 +41,19 @@ func main() {
 		slog.Error("kube client init failed", "err", err)
 		os.Exit(1)
 	}
-	verifier, err := auth.NewVerifier(context.Background(), os.Getenv("OIDC_ISSUER"), os.Getenv("OIDC_AUDIENCE"))
-	if err != nil {
-		slog.Error("oidc verifier init failed", "err", err)
-		os.Exit(1)
+	// ArgoCD-style local accounts: a mounted ConfigMap dir (one file per user,
+	// "role:bcryptHash"). Sessions are HMAC cookies; empty SESSION_SECRET means a
+	// per-boot random key (restart = re-login).
+	accountsDir := os.Getenv("ACCOUNTS_DIR")
+	if accountsDir == "" {
+		accountsDir = "/etc/istio-dashboard/accounts"
 	}
-	srv := api.NewServer(*dev, factory, verifier)
+	if !*dev {
+		if _, err := os.Stat(accountsDir); err != nil {
+			slog.Warn("accounts dir not readable — no one can log in until the ConfigMap is mounted", "dir", accountsDir, "err", err)
+		}
+	}
+	srv := api.NewServer(*dev, factory, auth.NewStore(accountsDir), auth.NewSessions(os.Getenv("SESSION_SECRET")))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

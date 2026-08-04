@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useCapabilities } from '../api/capabilities'
-import { clearToken, getToken } from '../auth/token'
+import { apiPost } from '../api/client'
 import { useTheme } from '../ui/theme'
 import { Icon } from './icons'
 import { Sidebar } from './Sidebar'
@@ -25,16 +25,18 @@ export function Layout({ children }: { children: ReactNode }) {
             <span className="chip bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">dev mode</span>
           ) : (
             <>
-              {data?.user && <span className="chip bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-slate-300">{data.user}</span>}
-              {getToken() && (
-                <button
-                  onClick={() => { clearToken(); window.location.reload() }}
-                  title="토큰 재설정"
-                  className="flex h-8 w-8 items-center justify-center rounded-md border border-base text-muted hover:text-strong"
-                >
-                  <Icon name="logout" className="h-4 w-4" />
-                </button>
+              {data?.user && (
+                <span className="chip bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-slate-300">
+                  {data.user}{data.role ? ` · ${data.role}` : ''}
+                </span>
               )}
+              <button
+                onClick={() => { void apiPost('/api/logout', {}).finally(() => window.location.reload()) }}
+                title="로그아웃"
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-base text-muted hover:text-strong"
+              >
+                <Icon name="logout" className="h-4 w-4" />
+              </button>
             </>
           )}
           <button

@@ -19,13 +19,12 @@ type capabilities struct {
 	NamespaceListAllowed    bool   `json:"namespaceListAllowed"`
 	DevMode                 bool   `json:"devMode"`
 	User                    string `json:"user,omitempty"`
+	Role                    string `json:"role,omitempty"`
 }
 
-// handleCapabilities reports CRD availability (via SA discovery) plus per-user
-// identity and namespace-list permission (via the user's token). CRD info alone
-// never authenticates the user, so the SSAR below doubles as the token check:
-// if Kubernetes rejects the token we answer 401 — otherwise an invalid token
-// would pass the login gate into a UI where every later call fails.
+// handleCapabilities reports CRD availability plus the session's identity/role.
+// Authentication itself happens in withAuth (session cookie) — an unauthenticated
+// request never reaches here.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	crd, err := s.factory.DetectCRDs()
 	if err != nil {
@@ -47,6 +46,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		NamespaceListAllowed:    nsAllowed,
 		DevMode:                 s.dev,
 		User:                    identityFrom(r.Context()).User(),
+		Role:                    identityFrom(r.Context()).Role,
 	})
 }
 
@@ -64,40 +64,24 @@ func (s *Server) canListNamespaces(ctx context.Context) (bool, error) {
 	return res.Status.Allowed, nil
 }
 
-// handleAccess runs SelfSubjectAccessReviews (with the user's token) for the
-// requested verbs on a resource type/namespace, so the UI can show a resource
-// read-only when the user lacks update/delete permission (Gemini gap #1).
+// handleAccess answers verb permissions from the session's app role (ArgoCD-style):
+// reads for everyone, writes for editor/admin. Kept as an endpoint so the UI's
+// read-only affordances (disabled buttons, banners) work unchanged.
 func (s *Server) handleAccess(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	rt, err := s.factory.ResolveType(r.PathValue("type"))
-	if err != nil {
+	if _, err := s.factory.ResolveType(r.PathValue("type")); err != nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", err.Error())
 		return
 	}
-	ns := nsParam(r)
-	name := r.PathValue("name")
-	if name == "-" { // placeholder for "no specific name" (create checks)
-		name = ""
-	}
-	verbs := strings.Split(r.URL.Query().Get("verbs"), ",")
+	canWrite := identityFrom(r.Context()).CanWrite()
 	out := map[string]bool{}
-	for _, v := range verbs {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
+	for _, v := range strings.Split(r.URL.Query().Get("verbs"), ",") {
+		switch v = strings.TrimSpace(v); v {
+		case "":
+		case "get", "list", "watch":
+			out[v] = true
+		default:
+			out[v] = canWrite
 		}
-		attrs := &authzv1.ResourceAttributes{
-			Group:    rt.Group,
-			Resource: rt.Resource,
-			Verb:     v,
-			Name:     name,
-		}
-		if rt.Namespaced {
-			attrs.Namespace = ns
-		}
-		review := &authzv1.SelfSubjectAccessReview{Spec: authzv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attrs}}
-		res, err := clientFrom(ctx).Kube.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
-		out[v] = err == nil && res.Status.Allowed
 	}
 	writeJSON(w, http.StatusOK, out)
 }

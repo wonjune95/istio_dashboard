@@ -8,8 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,12 +33,12 @@ const vsTypeID = "virtualservices.networking.istio.io"
 
 // stubSource implements ClientSource for handler tests.
 type stubSource struct {
-	clients     *k8s.Clients
-	forTokenErr error
+	clients *k8s.Clients
+	baseErr error
 }
 
-func (s *stubSource) ForToken(string) (*k8s.Clients, error) {
-	return s.clients, s.forTokenErr
+func (s *stubSource) Base() (*k8s.Clients, error) {
+	return s.clients, s.baseErr
 }
 
 func (s *stubSource) ResolveType(typeID string) (k8s.ResolvedType, error) {
@@ -54,15 +59,28 @@ func (s *stubSource) DetectCRDs() (k8s.CRDInfo, error)           { return k8s.CR
 func (s *stubSource) SpecSchema(string) (json.RawMessage, error) { return nil, errors.New("none") }
 func (s *stubSource) IstiodVersion(context.Context) string       { return "" }
 
+var testSessions = auth.NewSessions("test-secret")
+
 func newTestMux(t *testing.T, source ClientSource) *http.ServeMux {
 	t.Helper()
-	verifier, err := auth.NewVerifier(context.Background(), "", "") // noop (no OIDC)
-	if err != nil {
-		t.Fatal(err)
-	}
 	mux := http.NewServeMux()
-	NewServer(false, source, verifier).Routes(mux)
+	NewServer(false, source, auth.NewStore(t.TempDir()), testSessions).Routes(mux)
 	return mux
+}
+
+// authedReq builds a request carrying a valid editor session cookie.
+func authedReq(method, path string, body *strings.Reader) *http.Request {
+	var r *http.Request
+	if body == nil {
+		r = httptest.NewRequest(method, path, nil)
+	} else {
+		r = httptest.NewRequest(method, path, body)
+	}
+	r.AddCookie(&http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "tester", Role: "editor"}, time.Hour),
+	})
+	return r
 }
 
 // captureLogs redirects slog to a buffer and returns the emitted JSON records.
@@ -87,10 +105,9 @@ func captureLogs(t *testing.T) func() []map[string]any {
 	}
 }
 
-// A request without a bearer token must be rejected as 401 — never silently
-// served with the pod ServiceAccount identity.
-func TestWithK8s_MissingTokenIs401(t *testing.T) {
-	mux := newTestMux(t, &stubSource{forTokenErr: k8s.ErrTokenRequired})
+// A request without a session cookie must be rejected as 401.
+func TestWithAuth_MissingSessionIs401(t *testing.T) {
+	mux := newTestMux(t, &stubSource{})
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/resourceTypes", nil))
@@ -99,13 +116,82 @@ func TestWithK8s_MissingTokenIs401(t *testing.T) {
 	}
 }
 
-func TestWithK8s_FactoryFailureIs500(t *testing.T) {
-	mux := newTestMux(t, &stubSource{forTokenErr: errors.New("boom")})
+// A forged/tampered cookie must be rejected as 401.
+func TestWithAuth_BadCookieIs401(t *testing.T) {
+	mux := newTestMux(t, &stubSource{})
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/resourceTypes", nil))
+	req := httptest.NewRequest("GET", "/api/resourceTypes", nil)
+	req.AddCookie(&http.Cookie{Name: "istio_dash_session", Value: "dGVzdGVy|admin|9999999999|forged"})
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+// viewer role must not pass mutating methods (403 before any k8s call).
+func TestWithAuth_ViewerWriteIs403(t *testing.T) {
+	mux := newTestMux(t, &stubSource{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/resources/"+vsTypeID, strings.NewReader(vsBody))
+	req.AddCookie(&http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "ro", Role: "viewer"}, time.Hour),
+	})
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWithAuth_FactoryFailureIs500(t *testing.T) {
+	mux := newTestMux(t, &stubSource{baseErr: errors.New("boom")})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, authedReq("GET", "/api/resourceTypes", nil))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// Login round-trip against a real accounts dir: wrong password 401, right
+// password sets a cookie that authenticates subsequent requests.
+func TestLogin_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	hash, err := bcrypt.GenerateFromPassword([]byte("s3cret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alice"), []byte("editor:"+string(hash)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kubefake.NewClientset()}},
+		auth.NewStore(dir), testSessions).Routes(mux)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"username":"alice","password":"wrong"}`)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong password: status = %d, want 401", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"username":"alice","password":"s3cret"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("no session cookie set")
+	}
+
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/capabilities", nil)
+	req.AddCookie(cookies[0])
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("capabilities with session: status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -140,7 +226,7 @@ func TestCreateResource_SuccessIsAudited(t *testing.T) {
 	mux := newTestMux(t, &stubSource{clients: clients})
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/resources/"+vsTypeID, strings.NewReader(vsBody)))
+	mux.ServeHTTP(rec, authedReq("POST", "/api/resources/"+vsTypeID, strings.NewReader(vsBody)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
 	}
@@ -166,7 +252,7 @@ func TestCreateResource_FailureAuditKeepsTarget(t *testing.T) {
 	mux := newTestMux(t, &stubSource{clients: clients})
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/resources/"+vsTypeID, strings.NewReader(vsBody)))
+	mux.ServeHTTP(rec, authedReq("POST", "/api/resources/"+vsTypeID, strings.NewReader(vsBody)))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
 	}
@@ -180,10 +266,9 @@ func TestCreateResource_FailureAuditKeepsTarget(t *testing.T) {
 	}
 }
 
-// Capabilities must not answer 200 for a token Kubernetes rejects — CRD info
-// comes from SA discovery, so without this check an invalid token slips past
-// the login gate into a UI where every later call 401s.
-func TestCapabilities_InvalidTokenIs401(t *testing.T) {
+// If the SA itself is rejected by the API server, capabilities surfaces the 401
+// instead of half-working.
+func TestCapabilities_SAUnauthorizedIs401(t *testing.T) {
 	kube := kubefake.NewClientset()
 	kube.PrependReactor("create", "selfsubjectaccessreviews", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewUnauthorized("token rejected")
@@ -191,17 +276,17 @@ func TestCapabilities_InvalidTokenIs401(t *testing.T) {
 	mux := newTestMux(t, &stubSource{clients: &k8s.Clients{Kube: kube}})
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/capabilities", nil))
+	mux.ServeHTTP(rec, authedReq("GET", "/api/capabilities", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
 	}
 }
 
-func TestCapabilities_ValidTokenIs200(t *testing.T) {
+func TestCapabilities_WithSessionIs200(t *testing.T) {
 	mux := newTestMux(t, &stubSource{clients: &k8s.Clients{Kube: kubefake.NewClientset()}})
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/capabilities", nil))
+	mux.ServeHTTP(rec, authedReq("GET", "/api/capabilities", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
@@ -213,7 +298,7 @@ func TestCreateResource_DryRunIsNotAudited(t *testing.T) {
 	mux := newTestMux(t, &stubSource{clients: clients})
 
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/resources/"+vsTypeID+"?dryRun=true", strings.NewReader(vsBody)))
+	mux.ServeHTTP(rec, authedReq("POST", "/api/resources/"+vsTypeID+"?dryRun=true", strings.NewReader(vsBody)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}

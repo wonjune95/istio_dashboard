@@ -1,84 +1,120 @@
-// Package auth verifies user identity. OIDC verification is a thin, optional layer:
-// the bearer token is passed through to Kubernetes regardless (RBAC authorizes), so
-// when no issuer is configured (dev / non-OIDC SA tokens) a noop verifier is used.
+// Package auth implements ArgoCD-style local accounts: users live in a mounted
+// ConfigMap (one file per user, content "role:bcryptHash"), login issues an
+// HMAC-signed session cookie, and the app's role — not per-user Kubernetes RBAC —
+// authorizes writes. All Kubernetes calls run as the pod's ServiceAccount.
 package auth
 
 import (
-	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
-	"net/http"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/crypto/bcrypt"
 )
 
+// Identity is the logged-in user attached to each request.
 type Identity struct {
-	Subject string
-	Email   string
+	Name string
+	Role string // admin | editor | viewer
 }
 
 // User returns a stable display identity for audit logs.
-func (i Identity) User() string {
-	if i.Email != "" {
-		return i.Email
-	}
-	return i.Subject
-}
+func (i Identity) User() string { return i.Name }
 
-type Verifier interface {
-	Verify(ctx context.Context, rawToken string) (Identity, error)
-}
+// CanWrite reports whether the role may mutate resources.
+func (i Identity) CanWrite() bool { return i.Role == "admin" || i.Role == "editor" }
 
-// NewVerifier returns an OIDC verifier when issuer is set, otherwise a noop verifier.
-func NewVerifier(ctx context.Context, issuer, audience string) (Verifier, error) {
-	if issuer == "" {
-		return noopVerifier{}, nil
+var validRoles = map[string]bool{"admin": true, "editor": true, "viewer": true}
+
+// Store reads accounts from dir on every call — logins are rare and a mounted
+// ConfigMap updates in place, so no caching/watching is needed.
+type Store struct{ dir string }
+
+func NewStore(dir string) *Store { return &Store{dir: dir} }
+
+var ErrBadCredentials = errors.New("잘못된 계정 또는 비밀번호입니다")
+
+// Authenticate verifies username/password and returns the account's role.
+func (s *Store) Authenticate(username, password string) (string, error) {
+	// usernames become file names; reject path tricks before touching the fs.
+	if username == "" || strings.ContainsAny(username, "/\\") || strings.HasPrefix(username, ".") {
+		return "", ErrBadCredentials
 	}
-	provider, err := oidc.NewProvider(ctx, issuer)
+	b, err := os.ReadFile(filepath.Join(s.dir, username))
 	if err != nil {
-		return nil, err
+		// burn comparable time so missing vs wrong-password is indistinguishable
+		_ = bcrypt.CompareHashAndPassword([]byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhi5B0xF3F0mQ5eGvHq0FhqYb6R1r1uW"), []byte(password))
+		return "", ErrBadCredentials
 	}
-	return oidcVerifier{v: provider.Verifier(&oidc.Config{ClientID: audience})}, nil
+	role, hash, ok := strings.Cut(strings.TrimSpace(string(b)), ":")
+	if !ok || !validRoles[role] {
+		return "", fmt.Errorf("계정 %q 설정이 잘못되었습니다 (형식: role:bcryptHash)", username)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		return "", ErrBadCredentials
+	}
+	return role, nil
 }
 
-// noopVerifier does not validate tokens (dev / non-OIDC). K8s still authorizes.
-type noopVerifier struct{}
+// Sessions signs and verifies session cookie values: "user|role|expiry|sig".
+type Sessions struct{ secret []byte }
 
-func (noopVerifier) Verify(context.Context, string) (Identity, error) { return Identity{}, nil }
-
-type oidcVerifier struct{ v *oidc.IDTokenVerifier }
-
-func (o oidcVerifier) Verify(ctx context.Context, raw string) (Identity, error) {
-	if raw == "" {
-		return Identity{}, errors.New("missing bearer token")
+// NewSessions uses SESSION_SECRET when provided; otherwise a random per-boot key.
+// ponytail: random key = everyone re-logs-in on pod restart (matches the in-memory
+// audit history trade-off); set SESSION_SECRET if that ever hurts.
+func NewSessions(secret string) *Sessions {
+	if secret != "" {
+		return &Sessions{secret: []byte(secret)}
 	}
-	t, err := o.v.Verify(ctx, raw)
-	if err != nil {
-		return Identity{}, err
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // no entropy — nothing sane to do
 	}
-	var claims struct {
-		Email string `json:"email"`
-		Sub   string `json:"sub"`
-	}
-	if err := t.Claims(&claims); err != nil {
-		return Identity{}, err
-	}
-	return Identity{Subject: claims.Sub, Email: claims.Email}, nil
+	return &Sessions{secret: b}
 }
 
-// BearerFrom extracts the user's token: the Authorization bearer if present, else
-// the access-token header injected by an authenticating reverse proxy
-// (oauth2-proxy / ingress auth). This lets prod front the dashboard with a proxy
-// instead of doing OIDC in the browser — airgap-friendly, no token in browser
-// storage. The token is then passed through to the Kubernetes API server.
-func BearerFrom(r *http.Request) string {
-	if after, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && after != "" {
-		return after
+func (s *Sessions) Sign(id Identity, ttl time.Duration) string {
+	payload := fmt.Sprintf("%s|%s|%d",
+		base64.RawURLEncoding.EncodeToString([]byte(id.Name)), id.Role, time.Now().Add(ttl).Unix())
+	return payload + "|" + s.sig(payload)
+}
+
+var ErrSessionInvalid = errors.New("로그인이 필요합니다")
+
+func (s *Sessions) Parse(value string) (Identity, error) {
+	i := strings.LastIndexByte(value, '|')
+	if i < 0 {
+		return Identity{}, ErrSessionInvalid
 	}
-	for _, h := range []string{"X-Auth-Request-Access-Token", "X-Forwarded-Access-Token"} {
-		if v := r.Header.Get(h); v != "" {
-			return v
-		}
+	payload, sig := value[:i], value[i+1:]
+	if !hmac.Equal([]byte(s.sig(payload)), []byte(sig)) {
+		return Identity{}, ErrSessionInvalid
 	}
-	return ""
+	parts := strings.Split(payload, "|")
+	if len(parts) != 3 {
+		return Identity{}, ErrSessionInvalid
+	}
+	exp, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return Identity{}, ErrSessionInvalid
+	}
+	name, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || !validRoles[parts[1]] {
+		return Identity{}, ErrSessionInvalid
+	}
+	return Identity{Name: string(name), Role: parts[1]}, nil
+}
+
+func (s *Sessions) sig(payload string) string {
+	m := hmac.New(sha256.New, s.secret)
+	m.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }

@@ -4,7 +4,7 @@ import { useCapabilities } from './api/capabilities'
 import { ApiError } from './api/client'
 import { Layout } from './components/Layout'
 import { Guard } from './pages/Guard'
-import { TokenGate } from './pages/TokenGate'
+import { Login } from './pages/Login'
 import { Home } from './pages/Home'
 import { Overview } from './pages/Overview'
 import { ResourceList } from './pages/ResourceList'
@@ -15,8 +15,8 @@ export function App() {
   const location = useLocation()
 
   if (isLoading) return <Centered>로딩 중…</Centered>
-  // 401 → the cluster wants a bearer token (none set, or it expired).
-  if (isError && error instanceof ApiError && error.status === 401) return <TokenGate />
+  // 401 → no session (or it expired) — show the local-account login.
+  if (isError && error instanceof ApiError && error.status === 401) return <Login />
   if (isError) return <Centered>백엔드 연결 실패: {(error as Error).message}</Centered>
 
   // No routing CRDs at all → install-guide screen.

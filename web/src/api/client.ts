@@ -1,5 +1,3 @@
-import { getToken } from '../auth/token'
-
 // Mirrors the backend error envelope (DESIGN.md §4.1).
 export class ApiError extends Error {
   status: number
@@ -12,9 +10,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = getToken()
+  // 인증은 HttpOnly 세션 쿠키가 담당한다 (same-origin fetch에 자동 포함).
   const headers: Record<string, string> = {}
-  if (token) headers['Authorization'] = `Bearer ${token}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   const res = await fetch(path, {

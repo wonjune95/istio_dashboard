@@ -1,14 +1,12 @@
 // Package k8s builds Kubernetes clients for the dashboard.
 //
-// Auth model (see DESIGN.md §2): each user request carries a bearer token that is
-// passed through to the API server, so Kubernetes RBAC authorizes per user. A
-// separate base config (in-cluster SA in prod, local kubeconfig in dev) is used
-// only for cluster-scoped CRD discovery — never for user-scoped reads/writes.
+// Auth model (ArgoCD-style): users log in with local accounts (internal/auth) and
+// the app's role decides what they may do. Every Kubernetes call runs as one
+// identity — the pod's ServiceAccount in prod, the local kubeconfig in dev.
 package k8s
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -21,9 +19,9 @@ import (
 	gateway "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
 
-// Clients bundles the clients a request needs, all built from the same
-// (user-scoped) config so RBAC applies uniformly. Dynamic drives the generic
-// resource engine (any registered CRD); the typed clients back specific helpers.
+// Clients bundles the clients a request needs, all built from the same config.
+// Dynamic drives the generic resource engine (any registered CRD); the typed
+// clients back specific helpers.
 type Clients struct {
 	Kube    kubernetes.Interface
 	Gateway gateway.Interface
@@ -31,15 +29,13 @@ type Clients struct {
 	Dynamic dynamic.Interface
 }
 
-// ErrTokenRequired is returned by ForToken when a non-dev request carries no
-// bearer token. Without this guard the request would silently act as the pod's
-// ServiceAccount instead of a user. Handlers map it to 401.
-var ErrTokenRequired = errors.New("bearer token required")
-
 type ClientFactory struct {
 	dev     bool
-	baseCfg *rest.Config // dev: local kubeconfig; prod: in-cluster SA (discovery only)
+	baseCfg *rest.Config // dev: local kubeconfig; prod: in-cluster SA
 	baseDyn dynamic.Interface
+
+	baseMu      sync.Mutex
+	baseClients *Clients // lazily built once from baseCfg
 
 	newDiscovery func() (discovery.DiscoveryInterface, error) // swappable in tests
 
@@ -80,46 +76,33 @@ func NewClientFactory(dev bool, kubeconfig string) (*ClientFactory, error) {
 	return f, nil
 }
 
-// ForToken returns clients acting as the user identified by bearerToken.
-// In dev they act as the base kubeconfig identity; outside dev a token is
-// mandatory — falling back to the base (SA) config would let unauthenticated
-// requests act as the pod's ServiceAccount.
-func (f *ClientFactory) ForToken(bearerToken string) (*Clients, error) {
-	if !f.dev && bearerToken == "" {
-		return nil, ErrTokenRequired
+// Base returns the shared clients built from the base config (SA in prod,
+// kubeconfig in dev). App-level roles authorize users; this single identity
+// performs all cluster operations.
+func (f *ClientFactory) Base() (*Clients, error) {
+	f.baseMu.Lock()
+	defer f.baseMu.Unlock()
+	if f.baseClients != nil {
+		return f.baseClients, nil
 	}
-	cfg := f.userConfig(bearerToken)
-	kube, err := kubernetes.NewForConfig(cfg)
+	kube, err := kubernetes.NewForConfig(f.baseCfg)
 	if err != nil {
 		return nil, err
 	}
-	gw, err := gateway.NewForConfig(cfg)
+	gw, err := gateway.NewForConfig(f.baseCfg)
 	if err != nil {
 		return nil, err
 	}
-	is, err := istio.NewForConfig(cfg)
+	is, err := istio.NewForConfig(f.baseCfg)
 	if err != nil {
 		return nil, err
 	}
-	dyn, err := dynamic.NewForConfig(cfg)
+	dyn, err := dynamic.NewForConfig(f.baseCfg)
 	if err != nil {
 		return nil, err
 	}
-	return &Clients{Kube: kube, Gateway: gw, Istio: is, Dynamic: dyn}, nil
-}
-
-func (f *ClientFactory) userConfig(bearerToken string) *rest.Config {
-	if f.dev {
-		return f.baseCfg
-	}
-	// Keep the base transport (TLS/CA, host) but swap auth to the user's token,
-	// clearing any SA/client-cert credentials so only the user token is used.
-	c := rest.CopyConfig(f.baseCfg)
-	c.BearerToken = bearerToken
-	c.BearerTokenFile = ""
-	c.Username, c.Password = "", ""
-	c.CertData, c.KeyData, c.CertFile, c.KeyFile = nil, nil, "", ""
-	return c
+	f.baseClients = &Clients{Kube: kube, Gateway: gw, Istio: is, Dynamic: dyn}
+	return f.baseClients, nil
 }
 
 // Discovery returns a discovery client on the base config — cluster-scoped CRD

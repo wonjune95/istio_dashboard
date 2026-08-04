@@ -36,10 +36,10 @@ spec:
             - name: http
               containerPort: 8080
           env:
-            - name: OIDC_ISSUER
-              value: {{ .Values.oidc.issuer | quote }}
-            - name: OIDC_AUDIENCE
-              value: {{ .Values.oidc.audience | quote }}
+            # ArgoCD 방식 로컬 계정: ConfigMap(accountsConfigMap)을 디렉터리로 마운트.
+            # 한 키 = 한 사용자, 값 = "role:bcryptHash". CM 수정만으로 계정 추가/삭제.
+            - name: ACCOUNTS_DIR
+              value: /etc/istio-dashboard/accounts
             - name: ISTIO_NAMESPACE
               value: {{ .Values.istioNamespace | quote }}
             # client-go / libraries may write under $HOME; point it at a writable
@@ -66,8 +66,17 @@ spec:
               mountPath: /tmp
             - name: home
               mountPath: /home/nonroot
+            - name: accounts
+              mountPath: /etc/istio-dashboard/accounts
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
         - name: home
           emptyDir: {}
+        # 헬름이 관리하지 않는 CM(예: deploy/examples/accounts-configmap.yaml)이라
+        # helm upgrade가 계정 수정을 덮어쓰지 않는다. optional: 없으면 로그인 불가로만 동작.
+        - name: accounts
+          configMap:
+            name: {{ .Values.accountsConfigMap }}
+            optional: true
