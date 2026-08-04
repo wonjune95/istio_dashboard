@@ -26,9 +26,9 @@ export function Layout({ children }: { children: ReactNode }) {
           ) : (
             <>
               {data?.user && (
-                <span className="chip bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-slate-300">
+                <Link to="/settings" title="설정" className="chip bg-gray-100 text-gray-600 hover:opacity-80 dark:bg-slate-800 dark:text-slate-300">
                   {data.user}{data.role ? ` · ${data.role}` : ''}
-                </span>
+                </Link>
               )}
               <button
                 onClick={() => { void apiPost('/api/logout', {}).finally(() => window.location.reload()) }}

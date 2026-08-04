@@ -46,6 +46,36 @@ subjects:
     name: {{ include "istio-dashboard.fullname" . }}
     namespace: {{ .Release.Namespace }}
 ---
+# 설정 페이지의 비밀번호 변경이 계정 ConfigMap을 patch할 수 있게 한다 (해당 CM 한정).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "istio-dashboard.fullname" . }}-accounts-writer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "istio-dashboard.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: [{{ .Values.accountsConfigMap | quote }}]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "istio-dashboard.fullname" . }}-accounts-writer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "istio-dashboard.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "istio-dashboard.fullname" . }}-accounts-writer
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "istio-dashboard.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+---
 # Read istiod's Deployment (image tag → 홈 화면의 컨트롤플레인 버전 표시).
 # istiod 네임스페이스에만 한정된 읽기 권한; 실패해도 버전 미표시로 degrade한다.
 apiVersion: rbac.authorization.k8s.io/v1

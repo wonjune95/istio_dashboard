@@ -9,6 +9,7 @@ import { Home } from './pages/Home'
 import { Overview } from './pages/Overview'
 import { ResourceList } from './pages/ResourceList'
 import { ResourceEdit } from './pages/ResourceEdit'
+import { Settings } from './pages/Settings'
 
 export function App() {
   const { data, isLoading, isError, error } = useCapabilities()
@@ -31,6 +32,7 @@ export function App() {
         <Route path="/resources/:type" element={<ResourceList />} />
         <Route path="/resources/:type/new" element={<ResourceEdit />} />
         <Route path="/resources/:type/:ns/:name" element={<ResourceEdit />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/guard" element={<Guard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

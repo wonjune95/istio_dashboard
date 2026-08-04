@@ -16,7 +16,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -64,7 +66,7 @@ var testSessions = auth.NewSessions("test-secret")
 func newTestMux(t *testing.T, source ClientSource) *http.ServeMux {
 	t.Helper()
 	mux := http.NewServeMux()
-	NewServer(false, source, auth.NewStore(t.TempDir()), testSessions).Routes(mux)
+	NewServer(false, source, auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}).Routes(mux)
 	return mux
 }
 
@@ -168,7 +170,7 @@ func TestLogin_RoundTrip(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kubefake.NewClientset()}},
-		auth.NewStore(dir), testSessions).Routes(mux)
+		auth.NewStore(dir), testSessions, AccountsCMRef{}).Routes(mux)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"username":"alice","password":"wrong"}`)))
@@ -304,5 +306,54 @@ func TestCreateResource_DryRunIsNotAudited(t *testing.T) {
 	}
 	if audit := findAudit(logs()); audit != nil {
 		t.Errorf("dry-run should not be audited: %v", audit)
+	}
+}
+
+// Password change: wrong current password 401; correct one patches the accounts
+// ConfigMap with a hash the new password verifies against.
+func TestPasswordChange_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	hash, _ := bcrypt.GenerateFromPassword([]byte("oldpw123"), bcrypt.MinCost)
+	if err := os.WriteFile(filepath.Join(dir, "alice"), []byte("viewer:"+string(hash)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kube := kubefake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "accounts", Namespace: "ns1"},
+		Data:       map[string]string{"alice": "viewer:" + string(hash)},
+	})
+	mux := http.NewServeMux()
+	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(dir), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}).Routes(mux)
+	cookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "alice", Role: "viewer"}, time.Hour),
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/account/password", strings.NewReader(`{"currentPassword":"wrong","newPassword":"newpw1234"}`))
+	req.AddCookie(cookie)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong current pw: status = %d, want 401: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/account/password", strings.NewReader(`{"currentPassword":"oldpw123","newPassword":"newpw1234"}`))
+	req.AddCookie(cookie)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("change: status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+
+	cm, err := kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, newHash, _ := strings.Cut(cm.Data["alice"], ":")
+	if role != "viewer" {
+		t.Errorf("role = %q, want viewer preserved", role)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(newHash), []byte("newpw1234")) != nil {
+		t.Error("patched hash does not verify the new password")
 	}
 }

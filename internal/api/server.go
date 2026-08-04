@@ -23,17 +23,18 @@ type ClientSource interface {
 
 // Server holds injected dependencies and exposes the JSON API handlers.
 type Server struct {
-	dev      bool
-	factory  ClientSource
-	accounts *auth.Store
-	sessions *auth.Sessions
+	dev        bool
+	factory    ClientSource
+	accounts   *auth.Store
+	sessions   *auth.Sessions
+	accountsCM AccountsCMRef // 비밀번호 변경이 patch할 계정 ConfigMap (빈 값이면 변경 불가)
 
 	auditMu  sync.Mutex
 	auditLog []AuditEntry // newest first, capped at auditKeep
 }
 
-func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *auth.Sessions) *Server {
-	return &Server{dev: dev, factory: factory, accounts: accounts, sessions: sessions}
+func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *auth.Sessions, accountsCM AccountsCMRef) *Server {
+	return &Server{dev: dev, factory: factory, accounts: accounts, sessions: sessions, accountsCM: accountsCM}
 }
 
 // Routes registers the /api/* handlers on mux. Probes, /metrics and static assets
@@ -41,6 +42,8 @@ func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *a
 func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	// 세션만 확인하고 역할 게이트는 없다 — viewer도 본인 비밀번호는 바꿀 수 있다.
+	mux.HandleFunc("POST /api/account/password", s.handlePasswordChange)
 	mux.Handle("GET /api/capabilities", s.withAuth(http.HandlerFunc(s.handleCapabilities)))
 	mux.Handle("GET /api/resourceTypes", s.withAuth(http.HandlerFunc(s.handleResourceTypes)))
 	mux.Handle("GET /api/resourceTypes/{type}/schema", s.withAuth(http.HandlerFunc(s.handleResourceSchema)))
@@ -62,23 +65,28 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/resources/{type}/{ns}/{name}", s.withAuth(http.HandlerFunc(s.handleDeleteResource)))
 }
 
+// sessionIdentity resolves the request's identity: fixed dev identity in dev
+// mode, otherwise the parsed session cookie.
+func (s *Server) sessionIdentity(r *http.Request) (auth.Identity, error) {
+	if s.dev {
+		return auth.Identity{Name: "dev", Role: "admin"}, nil
+	}
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return auth.Identity{}, auth.ErrSessionInvalid
+	}
+	return s.sessions.Parse(c.Value)
+}
+
 // withAuth authenticates the session cookie (ArgoCD-style app auth), enforces
 // the role on mutating methods, and injects the shared SA-backed client plus the
 // user's identity into the context. Dev mode skips the session entirely.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := auth.Identity{Name: "dev", Role: "admin"}
-		if !s.dev {
-			c, err := r.Cookie(sessionCookie)
-			if err != nil {
-				writeError(w, http.StatusUnauthorized, "Unauthorized", "로그인이 필요합니다")
-				return
-			}
-			id, err = s.sessions.Parse(c.Value)
-			if err != nil {
-				writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
-				return
-			}
+		id, err := s.sessionIdentity(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+			return
 		}
 		if r.Method != http.MethodGet && !id.CanWrite() {
 			writeError(w, http.StatusForbidden, "Forbidden", "viewer 역할은 변경할 수 없습니다")

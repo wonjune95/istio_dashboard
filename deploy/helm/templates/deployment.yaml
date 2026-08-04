@@ -40,6 +40,13 @@ spec:
             # 한 키 = 한 사용자, 값 = "role:bcryptHash". CM 수정만으로 계정 추가/삭제.
             - name: ACCOUNTS_DIR
               value: /etc/istio-dashboard/accounts
+            # 비밀번호 변경(설정 페이지)이 patch할 계정 ConfigMap 위치
+            - name: ACCOUNTS_CONFIGMAP
+              value: {{ .Values.accountsConfigMap | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: ISTIO_NAMESPACE
               value: {{ .Values.istioNamespace | quote }}
             # client-go / libraries may write under $HOME; point it at a writable

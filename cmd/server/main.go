@@ -53,7 +53,8 @@ func main() {
 			slog.Warn("accounts dir not readable — no one can log in until the ConfigMap is mounted", "dir", accountsDir, "err", err)
 		}
 	}
-	srv := api.NewServer(*dev, factory, auth.NewStore(accountsDir), auth.NewSessions(os.Getenv("SESSION_SECRET")))
+	srv := api.NewServer(*dev, factory, auth.NewStore(accountsDir), auth.NewSessions(os.Getenv("SESSION_SECRET")),
+		api.AccountsCMRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("ACCOUNTS_CONFIGMAP")})
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
