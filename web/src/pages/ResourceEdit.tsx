@@ -202,9 +202,18 @@ export function ResourceEdit() {
     else run()
   }
 
+  // 폼/YAML 공통 적용 경로의 사전 검증: 파싱 + 이름/네임스페이스 필수.
+  function parseBody(): any | null {
+    let body: any
+    try { body = yamlLoad(text ?? '') } catch (e) { toast('error', `YAML 파싱 오류: ${(e as Error).message}`); return null }
+    if (!body?.metadata?.name) { toast('error', '이름(metadata.name)은 필수입니다.'); return null }
+    if (rt?.namespaced && !body.metadata.namespace) { toast('error', '네임스페이스(metadata.namespace)는 필수입니다.'); return null }
+    return body
+  }
+
   async function doApply(dryRun: boolean) {
-    let body: unknown
-    try { body = yamlLoad(text ?? '') } catch (e) { toast('error', `YAML 파싱 오류: ${(e as Error).message}`); return }
+    const body = parseBody()
+    if (body === null) return
     setBusy(true)
     try {
       const q = `?dryRun=${dryRun}`
@@ -238,9 +247,9 @@ export function ResourceEdit() {
   // Re-apply my edits on top of the latest serverside version (last-write-wins
   // after a human reviewed the diff). Grafts the fresh resourceVersion in.
   async function forceOverwrite(latestRV: string) {
-    let body: any
-    try { body = yamlLoad(text ?? '') } catch (e) { toast('error', `YAML 파싱 오류: ${(e as Error).message}`); return }
-    if (body?.metadata) body.metadata.resourceVersion = latestRV
+    const body = parseBody()
+    if (body === null) return
+    if (body.metadata) body.metadata.resourceVersion = latestRV
     setBusy(true)
     try {
       await apiPut(`/api/resources/${type}/${ns}/${name}`, body)
@@ -261,8 +270,8 @@ export function ResourceEdit() {
   // Runs a dry-run to get the would-be-applied object, then opens a diff preview
   // (kubectl-diff style) against the current object before the real apply.
   async function openPreview() {
-    let body: unknown
-    try { body = yamlLoad(text ?? '') } catch (e) { toast('error', `YAML 파싱 오류: ${(e as Error).message}`); return }
+    const body = parseBody()
+    if (body === null) return
     setBusy(true)
     try {
       const q = '?dryRun=true'
@@ -351,6 +360,31 @@ export function ResourceEdit() {
           spec={obj?.spec ?? {}}
           ns={formNs}
           onChange={(newSpec: any) => setText(yamlDump({ ...obj, spec: newSpec }))}
+          header={
+            // 자동 폼은 spec만 렌더하므로 이름/네임스페이스는 여기서 받는다 (필수).
+            <div className="mb-5 grid grid-cols-2 gap-4 border-b border-base pb-5">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-muted">Name<span className="text-red-500">*</span></span>
+                <input
+                  className="input-base disabled:bg-gray-100 dark:disabled:bg-slate-800"
+                  value={obj?.metadata?.name ?? ''}
+                  disabled={isEdit}
+                  onChange={(e) => setText(yamlDump({ ...obj, metadata: { ...obj?.metadata, name: e.target.value } }))}
+                />
+              </label>
+              {rt.namespaced && (
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-muted">Namespace<span className="text-red-500">*</span></span>
+                  <input
+                    className="input-base disabled:bg-gray-100 dark:disabled:bg-slate-800"
+                    value={obj?.metadata?.namespace ?? ''}
+                    disabled={isEdit}
+                    onChange={(e) => setText(yamlDump({ ...obj, metadata: { ...obj?.metadata, namespace: e.target.value } }))}
+                  />
+                </label>
+              )}
+            </div>
+          }
         />
       ) : (
         <YamlEditor value={text} onChange={setText} readOnly={readOnly} />

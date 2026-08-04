@@ -26,11 +26,13 @@ export function AutoForm({
   spec,
   ns,
   onChange,
+  header,
 }: {
   type: string
   spec: any
   ns: string
   onChange: (spec: any) => void
+  header?: ReactNode // 이름/네임스페이스 등 metadata 입력 — spec 폼과 같은 패널에 렌더
 }) {
   const schema = useSchema(type, true)
   const [initial] = useState<any>(() => spec ?? {}) // captured once; never updated
@@ -41,6 +43,7 @@ export function AutoForm({
 
   return (
     <div className="rjsf-compact panel p-5 shadow-sm">
+      {header}
       <ErrorBoundary fallback={<div className="text-sm text-amber-600 dark:text-amber-400">이 리소스는 폼으로 렌더하기 어렵습니다 — YAML 탭을 사용하세요.</div>}>
         <Form
           schema={prepared.jsonSchema}
