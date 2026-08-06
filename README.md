@@ -47,7 +47,8 @@ sequenceDiagram
     Dash-->>User: JSON 응답 (viewer면 UI도 읽기전용)
 ```
 
-- **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 계정 추가/삭제/역할 변경은 `kubectl edit`이면 끝이고, 마운트 동기화로 **재시작 없이 1분 내 반영**된다. 헬름이 이 CM을 관리하지 않아 upgrade에도 계정이 유지된다.
+- **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 파드가 아니라 클러스터(etcd)에 저장되므로 **파드 재시작·재배포에도 계정은 유지**되고, 헬름이 이 CM을 관리하지 않아 upgrade에도 살아남는다. 변경은 마운트 동기화로 **재시작 없이 1분 내 반영**된다.
+- **계정 관리 UI** — admin은 설정 페이지에서 계정 추가·역할/비밀번호 변경·삭제를 할 수 있다(`GET/PUT/DELETE /api/accounts`, 서버가 CM을 patch). 잠금 방지를 위해 본인 삭제·본인 역할 변경은 차단. 물론 `kubectl edit`으로도 가능하다.
 - **초기 admin 자동 생성** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 첫 로그인 후 설정 페이지에서 반드시 비밀번호를 변경하자.
 - **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
 - **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
@@ -210,9 +211,9 @@ ArgoCD와 같은 구조다 — 클러스터 권한과 사용자 권한을 분리
 | 층 | 담당 | 내용 |
 |---|---|---|
 | 클러스터 (K8s RBAC) | 파드 ServiceAccount | 관리 대상 CRD(`*.networking.istio.io`, `security/telemetry.istio.io`, `*.gateway.networking.k8s.io`) CRUD + namespaces/services 읽기 + 계정 CM patch. 헬름이 자동 구성. |
-| 사용자 (앱 역할) | 계정 ConfigMap | `admin`/`editor` = 변경 가능, `viewer` = 조회만. 서버가 모든 변경 요청을 역할로 게이트(403). |
+| 사용자 (앱 역할) | 계정 ConfigMap | `admin` = 변경 + 계정 관리, `editor` = 변경 가능, `viewer` = 조회만. 서버가 모든 변경 요청을 역할로 게이트(403). |
 
-계정 관리는 전부 `istio-dashboard-accounts` ConfigMap에서 한다: 키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제. 본인 비밀번호는 각자 설정 페이지에서 변경한다.
+계정 관리는 admin이 설정 페이지의 **계정 관리 UI**에서 하거나(추가·역할/비밀번호 변경·삭제), `istio-dashboard-accounts` ConfigMap을 직접 편집해도 된다(키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제). 본인 비밀번호는 각자 설정 페이지에서 변경한다.
 
 ## 라이선스
 
