@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,12 +15,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// InitialAdminSecret은 ArgoCD의 argocd-initial-admin-secret과 같은 역할:
-// 자동 생성된 admin 초기 비밀번호(평문)를 담는다. 비밀번호 변경 후 지워도 된다.
-const InitialAdminSecret = "istio-dashboard-initial-admin-secret"
-
 // EnsureInitialAdmin은 계정 ConfigMap에 admin이 없으면(또는 CM 자체가 없으면)
-// 랜덤 초기 비밀번호를 생성해 해시는 CM에, 평문은 Secret에 저장한다.
+// 초기 계정 admin/admin을 생성한다. 계정 추가·변경은 이 ConfigMap 편집으로 한다.
 // 부팅을 막을 일은 아니므로 실패는 경고 로그로만 남긴다.
 func (s *Server) EnsureInitialAdmin(ctx context.Context) {
 	if s.dev || s.accountsCM.Name == "" {
@@ -44,13 +38,7 @@ func (s *Server) EnsureInitialAdmin(ctx context.Context) {
 		return
 	}
 
-	raw := make([]byte, 12)
-	if _, err := rand.Read(raw); err != nil {
-		slog.Warn("initial admin: entropy unavailable", "err", err)
-		return
-	}
-	pw := base64.RawURLEncoding.EncodeToString(raw)
-	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
 	if err != nil {
 		slog.Warn("initial admin: hash failed", "err", err)
 		return
@@ -68,23 +56,7 @@ func (s *Server) EnsureInitialAdmin(ctx context.Context) {
 		slog.Warn("initial admin: write accounts configmap failed", "err", err)
 		return
 	}
-
-	secrets := client.Kube.CoreV1().Secrets(s.accountsCM.Namespace)
-	sec := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: InitialAdminSecret, Namespace: s.accountsCM.Namespace},
-		StringData: map[string]string{"password": pw},
-	}
-	if _, err := secrets.Create(ctx, sec, metav1.CreateOptions{}); apierrors.IsAlreadyExists(err) {
-		_, err = secrets.Update(ctx, sec, metav1.UpdateOptions{})
-		if err != nil {
-			slog.Warn("initial admin: update secret failed", "err", err)
-			return
-		}
-	} else if err != nil {
-		slog.Warn("initial admin: create secret failed", "err", err)
-		return
-	}
-	slog.Info("initial admin password generated", "secret", s.accountsCM.Namespace+"/"+InitialAdminSecret)
+	slog.Info("initial admin account created (admin/admin) — 로그인 후 비밀번호를 변경하세요")
 }
 
 // AccountsCMRef locates the accounts ConfigMap so password changes can be

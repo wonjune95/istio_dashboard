@@ -14,7 +14,7 @@
 
 ## 요약 (TL;DR)
 
-- **ArgoCD 방식 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 비밀번호를 자동 생성해 Secret에 남긴다** (ArgoCD의 initial-admin-secret과 동일한 UX).
+- **ArgoCD 방식 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 계정 `admin`/`admin`을 자동 생성한다** (첫 로그인 후 비밀번호 변경 권장).
 - **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다. 대시보드를 거친 모든 변경은 홈의 **변경 히스토리**에 계정명과 함께 기록된다.
 - **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 서버가 세션 저장소를 갖지 않아(서명 쿠키) N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
 - **제네릭 리소스 엔진** — 특정 CRD에 종속되지 않는 dynamic client 기반. Istio 12종 + Gateway API 7종을 하나의 CRUD 파이프라인으로 다룬다.
@@ -48,7 +48,7 @@ sequenceDiagram
 ```
 
 - **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 계정 추가/삭제/역할 변경은 `kubectl edit`이면 끝이고, 마운트 동기화로 **재시작 없이 1분 내 반영**된다. 헬름이 이 CM을 관리하지 않아 upgrade에도 계정이 유지된다.
-- **초기 admin 자동 생성** — 부팅 시 admin 계정이 없으면 랜덤 비밀번호를 만들어 해시는 CM에, 평문은 `istio-dashboard-initial-admin-secret` Secret에 저장한다. 첫 로그인 후 설정 페이지에서 비밀번호를 바꾸면 Secret은 지워도 된다.
+- **초기 admin 자동 생성** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 첫 로그인 후 설정 페이지에서 반드시 비밀번호를 변경하자.
 - **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
 - **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
 - **세션은 서명 쿠키** — 서버 저장소가 없어 무상태 HA 그대로. `SESSION_SECRET` 미설정 시 부팅마다 랜덤 키(재시작 = 재로그인).
@@ -115,13 +115,8 @@ helm install istio-dashboard ./deploy/helm -n istio-system \
 kubectl apply -f deploy/examples/httproute.yaml
 ```
 
-### 4) 초기 admin 비밀번호 조회 → 로그인
-첫 부팅 때 admin 계정과 초기 비밀번호가 자동 생성된다 (ArgoCD와 동일한 방식):
-```bash
-kubectl -n istio-system get secret istio-dashboard-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d
-```
-`admin` + 위 비밀번호로 로그인 → 설정 페이지(헤더의 사용자 칩)에서 비밀번호 변경. 변경 후 Secret은 지워도 된다.
+### 4) 로그인
+첫 부팅 때 초기 계정 **`admin` / `admin`** 이 자동 생성된다. 로그인 후 설정 페이지(헤더의 사용자 칩)에서 반드시 비밀번호를 변경하자.
 
 ![로그인 화면](docs/screenshot-login.png)
 
