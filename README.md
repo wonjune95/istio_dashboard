@@ -121,6 +121,7 @@ kubectl apply -f deploy/examples/httproute.yaml
 ![로그인 화면](docs/screenshot-login.png)
 
 ### 5) 계정 추가
+admin으로 로그인하면 **설정 페이지의 계정 관리**에서 계정 추가·역할/비밀번호 변경·삭제를 UI로 할 수 있다 (본인 삭제·본인 역할 변경은 잠금 방지를 위해 차단). 저장소는 여전히 ConfigMap이므로 kubectl로도 가능하다:
 ```bash
 go run ./hack/bcrypt-hash.go '비밀번호'                      # bcrypt 해시 생성
 # (Go가 없으면) htpasswd -bnBC 10 "" '비밀번호' | tr -d ':\n'

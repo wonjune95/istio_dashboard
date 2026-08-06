@@ -44,6 +44,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	// 세션만 확인하고 역할 게이트는 없다 — viewer도 본인 비밀번호는 바꿀 수 있다.
 	mux.HandleFunc("POST /api/account/password", s.handlePasswordChange)
+	// 계정 관리 — 핸들러 내부에서 admin 역할을 강제한다.
+	mux.HandleFunc("GET /api/accounts", s.handleAccountsList)
+	mux.HandleFunc("PUT /api/accounts/{name}", s.handleAccountUpsert)
+	mux.HandleFunc("DELETE /api/accounts/{name}", s.handleAccountDelete)
 	mux.Handle("GET /api/capabilities", s.withAuth(http.HandlerFunc(s.handleCapabilities)))
 	mux.Handle("GET /api/resourceTypes", s.withAuth(http.HandlerFunc(s.handleResourceTypes)))
 	mux.Handle("GET /api/resourceTypes/{type}/schema", s.withAuth(http.HandlerFunc(s.handleResourceSchema)))

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"istio-dashboard/internal/auth"
 )
 
 // EnsureInitialAdmin은 계정 ConfigMap에 admin이 없으면(또는 CM 자체가 없으면)
@@ -110,12 +115,13 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) patchAccount(ctx context.Context, user, entry string) error {
+// patchAccount merge-patches one ConfigMap key; entry nil deletes the key.
+func (s *Server) patchAccount(ctx context.Context, user string, entry any) error {
 	client, err := s.factory.Base()
 	if err != nil {
 		return err
 	}
-	b, err := json.Marshal(map[string]any{"data": map[string]string{user: entry}})
+	b, err := json.Marshal(map[string]any{"data": map[string]any{user: entry}})
 	if err != nil {
 		return err
 	}
@@ -125,4 +131,144 @@ func (s *Server) patchAccount(ctx context.Context, user, entry string) error {
 		return fmt.Errorf("%s/%s: %w", s.accountsCM.Namespace, s.accountsCM.Name, err)
 	}
 	return nil
+}
+
+// --- 계정 관리 (admin 전용): ConfigMap을 API로 노출해 UI에서 편집한다 ---
+
+// ConfigMap 키 제약(-._a-zA-Z0-9)이자 Store의 파일명 제약을 만족하는 사용자명.
+var validUsername = regexp.MustCompile(`^[a-zA-Z0-9][-._a-zA-Z0-9]{0,63}$`)
+
+// adminGuard checks dev mode, session, admin role and CM configuration.
+// 실패 시 이미 응답을 썼으므로 ok=false면 그대로 return.
+func (s *Server) adminGuard(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
+	if s.dev {
+		writeError(w, http.StatusBadRequest, "BadRequest", "dev 모드에는 계정이 없습니다")
+		return auth.Identity{}, false
+	}
+	id, err := s.sessionIdentity(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+		return auth.Identity{}, false
+	}
+	if id.Role != "admin" {
+		writeError(w, http.StatusForbidden, "Forbidden", "계정 관리는 admin만 할 수 있습니다")
+		return auth.Identity{}, false
+	}
+	if s.accountsCM.Name == "" {
+		writeError(w, http.StatusInternalServerError, "Internal", "계정 ConfigMap 위치가 설정되지 않았습니다 (ACCOUNTS_CONFIGMAP/POD_NAMESPACE)")
+		return auth.Identity{}, false
+	}
+	return id, true
+}
+
+func (s *Server) handleAccountsList(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.adminGuard(w, r); !ok {
+		return
+	}
+	client, err := s.factory.Base()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Internal", err.Error())
+		return
+	}
+	cm, err := client.Kube.CoreV1().ConfigMaps(s.accountsCM.Namespace).Get(r.Context(), s.accountsCM.Name, metav1.GetOptions{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Internal", "계정 ConfigMap 조회 실패: "+err.Error())
+		return
+	}
+	type account struct {
+		Name string `json:"name"`
+		Role string `json:"role"`
+	}
+	list := make([]account, 0, len(cm.Data))
+	for name, entry := range cm.Data {
+		role, _, _ := strings.Cut(entry, ":")
+		list = append(list, account{Name: name, Role: role})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	writeJSON(w, http.StatusOK, list)
+}
+
+// handleAccountUpsert creates or updates an account. 비밀번호를 비우면 기존
+// 해시를 유지한 채 역할만 바꾼다. 본인 역할 변경은 잠금 방지를 위해 막는다.
+func (s *Server) handleAccountUpsert(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.adminGuard(w, r)
+	if !ok {
+		return
+	}
+	name := r.PathValue("name")
+	if !validUsername.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "BadRequest", "사용자명은 영숫자로 시작하는 영숫자·-._ 64자 이내여야 합니다")
+		return
+	}
+	var in struct {
+		Role     string `json:"role"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "BadRequest", "잘못된 요청 형식입니다")
+		return
+	}
+	if !auth.ValidRole(in.Role) {
+		writeError(w, http.StatusBadRequest, "BadRequest", "역할은 admin/editor/viewer 중 하나여야 합니다")
+		return
+	}
+	if name == id.Name && in.Role != id.Role {
+		writeError(w, http.StatusBadRequest, "BadRequest", "본인 역할은 변경할 수 없습니다")
+		return
+	}
+	var entry string
+	if in.Password != "" {
+		if len(in.Password) < 8 {
+			writeError(w, http.StatusBadRequest, "BadRequest", "비밀번호는 8자 이상이어야 합니다")
+			return
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal", err.Error())
+			return
+		}
+		entry = in.Role + ":" + string(hash)
+	} else {
+		// 역할만 변경: 기존 해시를 읽어 유지한다.
+		client, err := s.factory.Base()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal", err.Error())
+			return
+		}
+		cm, err := client.Kube.CoreV1().ConfigMaps(s.accountsCM.Namespace).Get(r.Context(), s.accountsCM.Name, metav1.GetOptions{})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal", "계정 ConfigMap 조회 실패: "+err.Error())
+			return
+		}
+		_, hash, found := strings.Cut(cm.Data[name], ":")
+		if !found {
+			writeError(w, http.StatusBadRequest, "BadRequest", "새 계정은 비밀번호가 필요합니다")
+			return
+		}
+		entry = in.Role + ":" + hash
+	}
+	if err := s.patchAccount(r.Context(), name, entry); err != nil {
+		writeError(w, http.StatusInternalServerError, "Internal", "계정 ConfigMap 갱신 실패: "+err.Error())
+		return
+	}
+	slog.Info("account upserted", "by", id.Name, "user", name, "role", in.Role)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.adminGuard(w, r)
+	if !ok {
+		return
+	}
+	name := r.PathValue("name")
+	if name == id.Name {
+		writeError(w, http.StatusBadRequest, "BadRequest", "본인 계정은 삭제할 수 없습니다")
+		return
+	}
+	if err := s.patchAccount(r.Context(), name, nil); err != nil {
+		writeError(w, http.StatusInternalServerError, "Internal", "계정 ConfigMap 갱신 실패: "+err.Error())
+		return
+	}
+	slog.Info("account deleted", "by", id.Name, "user", name)
+	w.WriteHeader(http.StatusNoContent)
 }

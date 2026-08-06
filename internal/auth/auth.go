@@ -34,6 +34,9 @@ func (i Identity) CanWrite() bool { return i.Role == "admin" || i.Role == "edito
 
 var validRoles = map[string]bool{"admin": true, "editor": true, "viewer": true}
 
+// ValidRole reports whether r is one of the app roles.
+func ValidRole(r string) bool { return validRoles[r] }
+
 // Store reads accounts from dir on every call — logins are rare and a mounted
 // ConfigMap updates in place, so no caching/watching is needed.
 type Store struct{ dir string }

@@ -358,6 +358,75 @@ func TestPasswordChange_RoundTrip(t *testing.T) {
 	}
 }
 
+// Account management API: non-admin 403; admin can create (hash verifies),
+// list, change role keeping the hash, and delete — but not self-delete.
+func TestAccountsAPI_RoundTrip(t *testing.T) {
+	kube := kubefake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "accounts", Namespace: "ns1"},
+		Data:       map[string]string{"admin": "admin:x"},
+	})
+	mux := http.NewServeMux()
+	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}).Routes(mux)
+	adminCookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
+	}
+	do := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.AddCookie(cookie)
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// editor may not manage accounts
+	editorCookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "tester", Role: "editor"}, time.Hour),
+	}
+	if rec := do("GET", "/api/accounts", "", editorCookie); rec.Code != http.StatusForbidden {
+		t.Fatalf("editor list: status = %d, want 403", rec.Code)
+	}
+
+	// create bob
+	if rec := do("PUT", "/api/accounts/bob", `{"role":"editor","password":"bobpw1234"}`, adminCookie); rec.Code != http.StatusNoContent {
+		t.Fatalf("create: status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	cm, _ := kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
+	role, hash, _ := strings.Cut(cm.Data["bob"], ":")
+	if role != "editor" || bcrypt.CompareHashAndPassword([]byte(hash), []byte("bobpw1234")) != nil {
+		t.Fatalf("created entry %q: role/hash mismatch", cm.Data["bob"])
+	}
+
+	// role change without password keeps the hash
+	if rec := do("PUT", "/api/accounts/bob", `{"role":"viewer","password":""}`, adminCookie); rec.Code != http.StatusNoContent {
+		t.Fatalf("role change: status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	cm, _ = kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
+	if cm.Data["bob"] != "viewer:"+hash {
+		t.Fatalf("role change: entry = %q, want viewer with same hash", cm.Data["bob"])
+	}
+
+	// list shows both accounts
+	rec := do("GET", "/api/accounts", "", adminCookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"bob"`) {
+		t.Fatalf("list: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	// self-delete blocked; deleting bob works
+	if rec := do("DELETE", "/api/accounts/admin", "", adminCookie); rec.Code != http.StatusBadRequest {
+		t.Fatalf("self-delete: status = %d, want 400", rec.Code)
+	}
+	if rec := do("DELETE", "/api/accounts/bob", "", adminCookie); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	cm, _ = kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
+	if _, exists := cm.Data["bob"]; exists {
+		t.Error("bob still present after delete")
+	}
+}
+
 // Fresh install: no accounts CM → EnsureInitialAdmin creates it with an
 // admin entry whose password is "admin".
 func TestEnsureInitialAdmin_FreshInstall(t *testing.T) {

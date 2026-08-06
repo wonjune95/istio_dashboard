@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useCapabilities } from '../api/capabilities'
-import { ApiError, apiPost } from '../api/client'
+import { ApiError, apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 import { useToast } from '../components/Toast'
 
 // ArgoCD의 User Info처럼 내 계정 정보 + 비밀번호 변경.
@@ -62,9 +62,128 @@ export function Settings() {
         </button>
       </form>
 
-      <p className="text-xs text-muted">
-        계정 추가/삭제·역할 변경은 관리자가 <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">istio-dashboard-accounts</code> ConfigMap으로 관리합니다.
-      </p>
+      {caps.data?.role === 'admin' ? (
+        <AccountsPanel me={caps.data.user ?? ''} />
+      ) : (
+        <p className="text-xs text-muted">
+          계정 추가/삭제·역할 변경은 관리자가 설정 페이지 또는{' '}
+          <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">istio-dashboard-accounts</code> ConfigMap으로 관리합니다.
+        </p>
+      )}
+    </div>
+  )
+}
+
+type Account = { name: string; role: string }
+
+// admin 전용 계정 관리: 목록/추가/역할·비밀번호 변경/삭제 (백엔드가 CM을 patch).
+function AccountsPanel({ me }: { me: string }) {
+  const toast = useToast()
+  const [accounts, setAccounts] = useState<Account[] | null>(null)
+  const [name, setName] = useState('')
+  const [role, setRole] = useState('viewer')
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const reload = useCallback(() => {
+    apiGet<Account[]>('/api/accounts').then(setAccounts).catch((err) => {
+      toast('error', err instanceof ApiError ? err.message : String(err))
+    })
+  }, [toast])
+  useEffect(reload, [reload])
+
+  const exists = accounts?.some((a) => a.name === name) ?? false
+  const canSubmit = name !== '' && (password !== '' || exists) && !busy
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!canSubmit) return
+    setBusy(true)
+    try {
+      await apiPut(`/api/accounts/${encodeURIComponent(name)}`, { role, password })
+      toast('success', `${name} 계정을 ${exists ? '변경' : '추가'}했습니다. (로그인 반영까지 최대 1분)`)
+      setName(''); setPassword(''); setRole('viewer')
+      reload()
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (target: string) => {
+    if (!window.confirm(`${target} 계정을 삭제할까요?`)) return
+    try {
+      await apiDelete(`/api/accounts/${encodeURIComponent(target)}`)
+      toast('success', `${target} 계정을 삭제했습니다.`)
+      reload()
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : String(err))
+    }
+  }
+
+  return (
+    <div className="panel space-y-3 rounded-xl p-5">
+      <h3 className="text-sm font-semibold text-strong">계정 관리</h3>
+      {accounts === null ? (
+        <p className="text-sm text-muted">불러오는 중…</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-xs text-muted dark:border-slate-700">
+              <th className="py-1.5 font-medium">아이디</th>
+              <th className="py-1.5 font-medium">역할</th>
+              <th className="py-1.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {accounts.map((a) => (
+              <tr key={a.name} className="border-b border-gray-100 last:border-0 dark:border-slate-800">
+                <td className="py-1.5 text-strong">{a.name}{a.name === me && <span className="ml-1 text-xs text-muted">(나)</span>}</td>
+                <td className="py-1.5">{a.role}</td>
+                <td className="py-1.5 text-right">
+                  <button
+                    onClick={() => remove(a.name)}
+                    disabled={a.name === me}
+                    className="text-xs text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
+                  >
+                    삭제
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <form onSubmit={submit} className="space-y-2 border-t border-gray-200 pt-3 dark:border-slate-700">
+        <p className="text-xs font-medium text-muted">계정 추가 / 변경</p>
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="아이디"
+            autoComplete="off"
+            className="input-base min-w-0 flex-1"
+          />
+          <select value={role} onChange={(e) => setRole(e.target.value)} className="input-base !w-32 shrink-0">
+            <option value="admin">admin</option>
+            <option value="editor">editor</option>
+            <option value="viewer">viewer</option>
+          </select>
+        </div>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={exists ? '비밀번호 (비우면 유지, 역할만 변경)' : '비밀번호 (8자 이상)'}
+          autoComplete="new-password"
+          className="input-base w-full"
+        />
+        <button type="submit" disabled={!canSubmit} className="btn-primary disabled:opacity-50">
+          {busy ? '저장 중…' : exists ? '계정 변경' : '계정 추가'}
+        </button>
+      </form>
     </div>
   )
 }
