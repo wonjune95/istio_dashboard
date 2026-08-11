@@ -16,3 +16,6 @@ web/dist/
 .DS_Store
 .idea/
 .vscode/
+
+# 로컬 빌드 산출물
+bin/

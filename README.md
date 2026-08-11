@@ -99,7 +99,13 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 
 이 프로젝트는 클러스터 안에서 돌리는 게 기본이다. 빌드 도구 없이 Docker와 Helm만 있으면 된다(이미지 빌드가 멀티스테이지라 Go/Node 로컬 설치 불필요).
 
-### 1) 이미지 빌드 & 푸시
+### 1) 이미지 준비
+릴리스 태그(`v*`)마다 GitHub Actions가 이미지를 발행한다 — 빌드 없이 바로 쓸 수 있다:
+```bash
+# 프리빌트 이미지 (권장)
+ghcr.io/wonjune95/istio-dashboard:latest
+```
+직접 빌드하려면 (멀티스테이지라 Go/Node 로컬 설치 불필요):
 ```bash
 docker build -t <registry>/istio-dashboard:<tag> .
 docker push <registry>/istio-dashboard:<tag>
@@ -133,6 +139,11 @@ kubectl -n istio-system edit configmap istio-dashboard-accounts
 ```
 재시작 불필요 — 마운트 동기화로 1분 내 반영된다. 예시는 `deploy/examples/accounts-configmap.yaml` 참고.
 
+### 6) 멀티클러스터 등록 (선택)
+한 대시보드로 여러 클러스터를 관리하려면, admin으로 **설정 페이지 → 클러스터 관리**에서 이름과 대상 클러스터의 kubeconfig를 붙여넣는다. 등록 즉시 연결 테스트가 실행되고, 성공하면 헤더 드롭다운에서 클러스터를 전환할 수 있다. 대상 클러스터에는 아무것도 설치하지 않으며, 자격증명은 대시보드가 있는 클러스터의 `istio-dashboard-clusters` Secret에만 저장된다.
+
+![설정 페이지 — 계정·클러스터 관리](docs/screenshot-settings.png)
+
 ---
 
 ## 설정
@@ -145,6 +156,7 @@ kubectl -n istio-system edit configmap istio-dashboard-accounts
 | `ACCOUNTS_DIR` | `/etc/istio-dashboard/accounts` | 계정 ConfigMap 마운트 경로 |
 | `ACCOUNTS_CONFIGMAP` / `POD_NAMESPACE` | (헬름이 주입) | 비밀번호 변경·초기 admin 생성이 patch할 CM 위치 |
 | `SESSION_SECRET` | (없음) | 세션 쿠키 서명 키. 비우면 부팅마다 랜덤(재시작 = 재로그인) |
+| `CLUSTERS_SECRET` / `POD_NAMESPACE` | (헬름이 주입) | 멀티클러스터: 원격 클러스터 kubeconfig Secret 이름 (비우면 local만) |
 
 프로브: `/healthz` (live) · `/readyz` (ready) · `/metrics` (Prometheus). 로그는 `slog` JSON 구조화(요청 로그 + 쓰기 감사 로그).
 
@@ -182,6 +194,7 @@ istio_dashboard/
 ├─ deploy/
 │  ├─ helm/                    # Chart: deployment / service / rbac / values
 │  └─ examples/                # accounts-configmap.yaml(계정) · httproute.yaml(노출 예시)
+├─ .github/workflows/          # ci.yml(테스트·빌드) · release.yml(태그 → ghcr.io 이미지 발행)
 ├─ Dockerfile  go.mod
 ```
 
