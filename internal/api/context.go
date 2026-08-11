@@ -14,6 +14,8 @@ type ctxKey int
 const (
 	clientKey ctxKey = iota
 	identityKey
+	factoryKey
+	clusterKey
 )
 
 func withClient(ctx context.Context, c *k8s.Clients) context.Context {
@@ -32,4 +34,25 @@ func withIdentity(ctx context.Context, id auth.Identity) context.Context {
 func identityFrom(ctx context.Context) auth.Identity {
 	id, _ := ctx.Value(identityKey).(auth.Identity)
 	return id
+}
+
+// withFactory carries the request's per-cluster factory (?cluster= 해석 결과) so
+// 카탈로그/스키마/CRD 조회도 대상 클러스터를 향한다.
+func withFactory(ctx context.Context, f ClientSource) context.Context {
+	return context.WithValue(ctx, factoryKey, f)
+}
+
+func factoryFrom(ctx context.Context) ClientSource {
+	f, _ := ctx.Value(factoryKey).(ClientSource)
+	return f
+}
+
+// withCluster records the non-local cluster name for audit entries.
+func withCluster(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, clusterKey, name)
+}
+
+func clusterFrom(ctx context.Context) string {
+	name, _ := ctx.Value(clusterKey).(string)
+	return name
 }

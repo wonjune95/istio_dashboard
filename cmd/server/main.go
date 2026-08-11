@@ -54,7 +54,9 @@ func main() {
 		}
 	}
 	srv := api.NewServer(*dev, factory, auth.NewStore(accountsDir), auth.NewSessions(os.Getenv("SESSION_SECRET")),
-		api.AccountsCMRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("ACCOUNTS_CONFIGMAP")})
+		api.AccountsCMRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("ACCOUNTS_CONFIGMAP")},
+		// 멀티클러스터: 원격 클러스터 kubeconfig를 담는 Secret (미설정이면 local만)
+		api.ClustersSecretRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("CLUSTERS_SECRET")})
 	// admin 계정이 없으면 초기 계정 admin/admin을 만든다.
 	srv.EnsureInitialAdmin(context.Background())
 

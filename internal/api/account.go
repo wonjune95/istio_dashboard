@@ -138,9 +138,9 @@ func (s *Server) patchAccount(ctx context.Context, user string, entry any) error
 // ConfigMap 키 제약(-._a-zA-Z0-9)이자 Store의 파일명 제약을 만족하는 사용자명.
 var validUsername = regexp.MustCompile(`^[a-zA-Z0-9][-._a-zA-Z0-9]{0,63}$`)
 
-// adminGuard checks dev mode, session, admin role and CM configuration.
+// adminOnly checks dev mode, session and admin role (계정·클러스터 관리 공용).
 // 실패 시 이미 응답을 썼으므로 ok=false면 그대로 return.
-func (s *Server) adminGuard(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
+func (s *Server) adminOnly(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
 	if s.dev {
 		writeError(w, http.StatusBadRequest, "BadRequest", "dev 모드에는 계정이 없습니다")
 		return auth.Identity{}, false
@@ -151,7 +151,16 @@ func (s *Server) adminGuard(w http.ResponseWriter, r *http.Request) (auth.Identi
 		return auth.Identity{}, false
 	}
 	if id.Role != "admin" {
-		writeError(w, http.StatusForbidden, "Forbidden", "계정 관리는 admin만 할 수 있습니다")
+		writeError(w, http.StatusForbidden, "Forbidden", "admin만 할 수 있습니다")
+		return auth.Identity{}, false
+	}
+	return id, true
+}
+
+// adminGuard = adminOnly + 계정 ConfigMap 설정 확인.
+func (s *Server) adminGuard(w http.ResponseWriter, r *http.Request) (auth.Identity, bool) {
+	id, ok := s.adminOnly(w, r)
+	if !ok {
 		return auth.Identity{}, false
 	}
 	if s.accountsCM.Name == "" {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useCapabilities } from '../api/capabilities'
-import { ApiError, apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import { useClusters } from '../api/clusters'
+import { ApiError, apiDelete, apiGet, apiPost, apiPut, getCluster, setCluster } from '../api/client'
 import { useToast } from '../components/Toast'
 
 // ArgoCD의 User Info처럼 내 계정 정보 + 비밀번호 변경.
@@ -63,13 +64,115 @@ export function Settings() {
       </form>
 
       {caps.data?.role === 'admin' ? (
-        <AccountsPanel me={caps.data.user ?? ''} />
+        <>
+          <AccountsPanel me={caps.data.user ?? ''} />
+          <ClustersPanel />
+        </>
       ) : (
         <p className="text-xs text-muted">
           계정 추가/삭제·역할 변경은 관리자가 설정 페이지 또는{' '}
           <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">istio-dashboard-accounts</code> ConfigMap으로 관리합니다.
         </p>
       )}
+    </div>
+  )
+}
+
+// admin 전용 멀티클러스터 관리: kubeconfig 붙여넣기로 등록 (백엔드가 Secret에 저장).
+function ClustersPanel() {
+  const toast = useToast()
+  const clusters = useClusters()
+  const [name, setName] = useState('')
+  const [kubeconfig, setKubeconfig] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name || !kubeconfig || busy) return
+    setBusy(true)
+    try {
+      const res = await apiPut<{ connected: boolean; version?: string; error?: string }>(
+        `/api/clusters/${encodeURIComponent(name)}`, { kubeconfig })
+      if (res.connected) {
+        toast('success', `${name} 클러스터를 등록했습니다 (${res.version})`)
+      } else {
+        toast('error', `저장은 됐지만 연결에 실패했습니다: ${res.error}`)
+      }
+      setName(''); setKubeconfig('')
+      void clusters.refetch()
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (target: string) => {
+    if (!window.confirm(`${target} 클러스터를 삭제할까요?`)) return
+    try {
+      await apiDelete(`/api/clusters/${encodeURIComponent(target)}`)
+      if (getCluster() === target) { setCluster(''); return } // 현재 클러스터 삭제 → local로 리로드
+      toast('success', `${target} 클러스터를 삭제했습니다.`)
+      void clusters.refetch()
+    } catch (err) {
+      toast('error', err instanceof ApiError ? err.message : String(err))
+    }
+  }
+
+  return (
+    <div className="panel space-y-3 rounded-xl p-5">
+      <h3 className="text-sm font-semibold text-strong">클러스터 관리</h3>
+      <p className="text-xs text-muted">
+        kubeconfig를 붙여넣으면 원격 클러스터가 등록됩니다 (ArgoCD처럼 자격증명은 로컬 클러스터 Secret에 저장).
+      </p>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 text-left text-xs text-muted dark:border-slate-700">
+            <th className="py-1.5 font-medium">이름</th>
+            <th className="py-1.5" />
+          </tr>
+        </thead>
+        <tbody>
+          {(clusters.data ?? [{ name: 'local' }]).map((c) => (
+            <tr key={c.name} className="border-b border-gray-100 last:border-0 dark:border-slate-800">
+              <td className="py-1.5 text-strong">
+                {c.name}{c.name === 'local' && <span className="ml-1 text-xs text-muted">(이 클러스터)</span>}
+              </td>
+              <td className="py-1.5 text-right">
+                <button
+                  onClick={() => remove(c.name)}
+                  disabled={c.name === 'local'}
+                  className="text-xs text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
+                >
+                  삭제
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <form onSubmit={submit} className="space-y-2 border-t border-gray-200 pt-3 dark:border-slate-700">
+        <p className="text-xs font-medium text-muted">클러스터 추가 / 변경</p>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="이름 (예: app-cluster)"
+          autoComplete="off"
+          className="input-base w-full"
+        />
+        <textarea
+          value={kubeconfig}
+          onChange={(e) => setKubeconfig(e.target.value)}
+          placeholder="kubeconfig 내용 붙여넣기"
+          rows={6}
+          spellCheck={false}
+          className="input-base w-full font-mono text-xs"
+        />
+        <button type="submit" disabled={!name || !kubeconfig || busy} className="btn-primary disabled:opacity-50">
+          {busy ? '연결 확인 중…' : '클러스터 등록'}
+        </button>
+      </form>
     </div>
   )
 }

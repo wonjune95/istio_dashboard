@@ -26,7 +26,7 @@ type capabilities struct {
 // Authentication itself happens in withAuth (session cookie) — an unauthenticated
 // request never reaches here.
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	crd, err := s.factory.DetectCRDs()
+	crd, err := factoryFrom(r.Context()).DetectCRDs()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Internal", err.Error())
 		return
@@ -42,7 +42,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		VirtualServiceInstalled: crd.VirtualService,
 		GatewayAPIVersion:       crd.GatewayAPIVersion,
 		IstioAPIVersion:         crd.IstioAPIVersion,
-		IstiodVersion:           s.factory.IstiodVersion(r.Context()),
+		IstiodVersion:           factoryFrom(r.Context()).IstiodVersion(r.Context()),
 		NamespaceListAllowed:    nsAllowed,
 		DevMode:                 s.dev,
 		User:                    identityFrom(r.Context()).User(),
@@ -68,7 +68,7 @@ func (s *Server) canListNamespaces(ctx context.Context) (bool, error) {
 // reads for everyone, writes for editor/admin. Kept as an endpoint so the UI's
 // read-only affordances (disabled buttons, banners) work unchanged.
 func (s *Server) handleAccess(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.factory.ResolveType(r.PathValue("type")); err != nil {
+	if _, err := factoryFrom(r.Context()).ResolveType(r.PathValue("type")); err != nil {
 		writeError(w, http.StatusBadRequest, "BadRequest", err.Error())
 		return
 	}
@@ -90,8 +90,8 @@ func (s *Server) handleAccess(w http.ResponseWriter, r *http.Request) {
 // and discovered version (drives the UI category/kind navigation). It reads the
 // same cached snapshot ResolveType uses, so the listing and the CRUD path never
 // disagree about what is installed.
-func (s *Server) handleResourceTypes(w http.ResponseWriter, _ *http.Request) {
-	cat, err := s.factory.CatalogCached()
+func (s *Server) handleResourceTypes(w http.ResponseWriter, r *http.Request) {
+	cat, err := factoryFrom(r.Context()).CatalogCached()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Internal", err.Error())
 		return
@@ -101,7 +101,7 @@ func (s *Server) handleResourceTypes(w http.ResponseWriter, _ *http.Request) {
 
 // handleResourceSchema returns a kind's spec OpenAPI schema for auto-form rendering.
 func (s *Server) handleResourceSchema(w http.ResponseWriter, r *http.Request) {
-	raw, err := s.factory.SpecSchema(r.PathValue("type"))
+	raw, err := factoryFrom(r.Context()).SpecSchema(r.PathValue("type"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "NotFound", err.Error())
 		return

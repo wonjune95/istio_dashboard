@@ -43,6 +43,9 @@ spec:
             # 비밀번호 변경(설정 페이지)이 patch할 계정 ConfigMap 위치
             - name: ACCOUNTS_CONFIGMAP
               value: {{ .Values.accountsConfigMap | quote }}
+            # 멀티클러스터: 원격 클러스터 kubeconfig Secret (빈 값이면 local만)
+            - name: CLUSTERS_SECRET
+              value: {{ .Values.clustersSecret | quote }}
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	istio "istio.io/client-go/pkg/clientset/versioned"
 	"k8s.io/client-go/discovery"
@@ -65,15 +66,50 @@ func NewClientFactory(dev bool, kubeconfig string) (*ClientFactory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load base kube config: %w", err)
 	}
+	f, err := newFactory(cfg)
+	if err != nil {
+		return nil, err
+	}
+	f.dev = dev
+	return f, nil
+}
+
+// NewClientFactoryFromKubeconfig builds a factory for a remote cluster from raw
+// kubeconfig bytes (멀티클러스터: clusters Secret에 저장된 값).
+func NewClientFactoryFromKubeconfig(data []byte) (*ClientFactory, error) {
+	cfg, err := clientcmd.RESTConfigFromKubeConfig(data)
+	if err != nil {
+		return nil, fmt.Errorf("kubeconfig 파싱 실패: %w", err)
+	}
+	return newFactory(cfg)
+}
+
+func newFactory(cfg *rest.Config) (*ClientFactory, error) {
 	baseDyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("base dynamic client: %w", err)
 	}
-	f := &ClientFactory{dev: dev, baseCfg: cfg, baseDyn: baseDyn}
+	f := &ClientFactory{baseCfg: cfg, baseDyn: baseDyn}
 	f.newDiscovery = func() (discovery.DiscoveryInterface, error) {
 		return discovery.NewDiscoveryClientForConfig(f.baseCfg)
 	}
 	return f, nil
+}
+
+// Ping checks API-server reachability (클러스터 등록 시 연결 테스트) and returns
+// the server's Kubernetes version.
+func (f *ClientFactory) Ping() (string, error) {
+	cfg := rest.CopyConfig(f.baseCfg)
+	cfg.Timeout = 5 * time.Second
+	disc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return "", err
+	}
+	v, err := disc.ServerVersion()
+	if err != nil {
+		return "", err
+	}
+	return v.GitVersion, nil
 }
 
 // Base returns the shared clients built from the base config (SA in prod,

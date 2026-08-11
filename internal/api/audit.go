@@ -15,6 +15,7 @@ import (
 // the structured audit log below is the durable record.
 type AuditEntry struct {
 	Time      time.Time `json:"time"`
+	Cluster   string    `json:"cluster,omitempty"` // 비어 있으면 local
 	User      string    `json:"user,omitempty"`
 	Verb      string    `json:"verb"` // create | update | delete
 	TypeID    string    `json:"typeId"`
@@ -45,6 +46,7 @@ func (s *Server) auditResource(ctx context.Context, verb, typeID, ns, name strin
 	attrs := []any{
 		slog.Bool("audit", true),
 		slog.Bool("dangerous", danger),
+		slog.String("cluster", clusterFrom(ctx)),
 		slog.String("user", identityFrom(ctx).User()),
 		slog.String("verb", verb),
 		slog.String("type", typeID),
@@ -63,6 +65,7 @@ func (s *Server) auditResource(ctx context.Context, verb, typeID, ns, name strin
 	s.auditMu.Lock()
 	s.auditLog = append([]AuditEntry{{
 		Time:      time.Now(),
+		Cluster:   clusterFrom(ctx),
 		User:      identityFrom(ctx).User(),
 		Verb:      verb,
 		TypeID:    typeID,

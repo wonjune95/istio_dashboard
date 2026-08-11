@@ -1,14 +1,21 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useCapabilities } from '../api/capabilities'
-import { apiPost } from '../api/client'
+import { useClusters } from '../api/clusters'
+import { apiPost, getCluster, setCluster } from '../api/client'
 import { useTheme } from '../ui/theme'
 import { Icon } from './icons'
 import { Sidebar } from './Sidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
   const { data } = useCapabilities()
+  const clusters = useClusters().data
   const { theme, toggle } = useTheme()
+
+  // 선택된 클러스터가 목록에서 사라졌으면(삭제됨) local로 복귀 — 400 루프 방지.
+  useEffect(() => {
+    if (clusters && getCluster() && !clusters.some((c) => c.name === getCluster())) setCluster('')
+  }, [clusters])
 
   return (
     <div className="flex h-screen flex-col">
@@ -21,6 +28,18 @@ export function Layout({ children }: { children: ReactNode }) {
         {/* no global namespace selector — Overview/ResourceList carry their own
             (they share the same persisted state, so the header one was redundant) */}
         <div className="ml-auto flex items-center gap-2 text-xs">
+          {clusters && clusters.length > 1 && (
+            <select
+              value={getCluster() || 'local'}
+              onChange={(e) => setCluster(e.target.value)}
+              title="클러스터"
+              className="input-base !w-auto !py-1"
+            >
+              {clusters.map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+          )}
           {data?.devMode ? (
             <span className="chip bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">dev mode</span>
           ) : (

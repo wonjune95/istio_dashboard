@@ -11,7 +11,7 @@ import (
 // resourceProvider resolves the typeID (resource.group) to an installed type and
 // builds a user-scoped generic provider.
 func (s *Server) resourceProvider(ctx context.Context, typeID string) (*k8s.ResourceProvider, error) {
-	rt, err := s.factory.ResolveType(typeID)
+	rt, err := factoryFrom(ctx).ResolveType(typeID)
 	if err != nil {
 		return nil, err
 	}

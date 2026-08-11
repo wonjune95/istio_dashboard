@@ -64,6 +64,14 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create"]
+  # 멀티클러스터: 원격 클러스터 kubeconfig Secret 읽기/갱신 (해당 Secret 한정)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ .Values.clustersSecret | quote }}]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

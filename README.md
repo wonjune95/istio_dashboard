@@ -18,6 +18,7 @@
 - **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다. 대시보드를 거친 모든 변경은 홈의 **변경 히스토리**에 계정명과 함께 기록된다.
 - **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 서버가 세션 저장소를 갖지 않아(서명 쿠키) N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
 - **제네릭 리소스 엔진** — 특정 CRD에 종속되지 않는 dynamic client 기반. Istio 12종 + Gateway API 7종을 하나의 CRUD 파이프라인으로 다룬다.
+- **멀티클러스터** — ArgoCD처럼 kubeconfig를 붙여넣어 원격 클러스터를 등록하고(설정 페이지, admin), 헤더 드롭다운으로 전환한다. 자격증명은 로컬 클러스터 Secret에만 저장되고, 대상 클러스터에는 아무것도 설치하지 않는다.
 
 ---
 
@@ -52,6 +53,7 @@ sequenceDiagram
 - **초기 admin 자동 생성** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 첫 로그인 후 설정 페이지에서 반드시 비밀번호를 변경하자.
 - **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
 - **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
+- **멀티클러스터** — 원격 클러스터 kubeconfig는 `istio-dashboard-clusters` Secret에 저장(키 = 클러스터명). 등록/삭제는 admin 전용 UI(`PUT/DELETE /api/clusters/{name}`, 등록 시 연결 테스트), 모든 API는 `?cluster=` 파라미터로 대상을 고른다(기본 `local`). CRD 카탈로그·스키마 캐시는 클러스터별로 분리되어 설치된 CRD가 달라도 안전하다.
 - **세션은 서명 쿠키** — 서버 저장소가 없어 무상태 HA 그대로. `SESSION_SECRET` 미설정 시 부팅마다 랜덤 키(재시작 = 재로그인).
 - **하드닝** — CSP(`default-src 'self'`) 등 보안 헤더, HttpOnly 쿠키, distroless non-root, readOnlyRootFilesystem.
 - **에어갭** — 프론트 번들을 바이너리에 인라인. 런타임 외부 의존 0.

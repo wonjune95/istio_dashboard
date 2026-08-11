@@ -66,7 +66,7 @@ var testSessions = auth.NewSessions("test-secret")
 func newTestMux(t *testing.T, source ClientSource) *http.ServeMux {
 	t.Helper()
 	mux := http.NewServeMux()
-	NewServer(false, source, auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}).Routes(mux)
+	NewServer(false, source, auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{}).Routes(mux)
 	return mux
 }
 
@@ -170,7 +170,7 @@ func TestLogin_RoundTrip(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kubefake.NewClientset()}},
-		auth.NewStore(dir), testSessions, AccountsCMRef{}).Routes(mux)
+		auth.NewStore(dir), testSessions, AccountsCMRef{}, ClustersSecretRef{}).Routes(mux)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"username":"alice","password":"wrong"}`)))
@@ -323,7 +323,7 @@ func TestPasswordChange_RoundTrip(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
-		auth.NewStore(dir), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}).Routes(mux)
+		auth.NewStore(dir), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
 	cookie := &http.Cookie{
 		Name:  "istio_dash_session",
 		Value: testSessions.Sign(auth.Identity{Name: "alice", Role: "viewer"}, time.Hour),
@@ -367,7 +367,7 @@ func TestAccountsAPI_RoundTrip(t *testing.T) {
 	})
 	mux := http.NewServeMux()
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
-		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}).Routes(mux)
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
 	adminCookie := &http.Cookie{
 		Name:  "istio_dash_session",
 		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
@@ -432,7 +432,7 @@ func TestAccountsAPI_RoundTrip(t *testing.T) {
 func TestEnsureInitialAdmin_FreshInstall(t *testing.T) {
 	kube := kubefake.NewClientset()
 	s := NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
-		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"})
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{})
 
 	s.EnsureInitialAdmin(context.Background())
 
@@ -453,5 +453,86 @@ func TestEnsureInitialAdmin_FreshInstall(t *testing.T) {
 	cm2, _ := kube.CoreV1().ConfigMaps("ns1").Get(context.Background(), "accounts", metav1.GetOptions{})
 	if cm2.Data["admin"] != cm.Data["admin"] {
 		t.Error("second run must not rotate the admin password")
+	}
+}
+
+// Cluster registry API: non-admin 403; invalid kubeconfig 400; a valid-but-
+// unreachable kubeconfig is saved (connected=false) and listed; local은 삭제 불가.
+func TestClustersAPI_RoundTrip(t *testing.T) {
+	kube := kubefake.NewClientset()
+	mux := http.NewServeMux()
+	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
+	adminCookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
+	}
+	do := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		var rd *strings.Reader
+		if body != "" {
+			rd = strings.NewReader(body)
+		} else {
+			rd = strings.NewReader("")
+		}
+		req := httptest.NewRequest(method, path, rd)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	editorCookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "bob", Role: "editor"}, time.Hour),
+	}
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- name: c
+  cluster: {server: "https://127.0.0.1:1"}
+users:
+- name: u
+  user: {token: t}
+contexts:
+- name: x
+  context: {cluster: c, user: u}
+current-context: x
+`
+	body, _ := json.Marshal(map[string]string{"kubeconfig": kubeconfig})
+
+	if rec := do("PUT", "/api/clusters/prod", string(body), editorCookie); rec.Code != http.StatusForbidden {
+		t.Fatalf("editor upsert: status = %d, want 403", rec.Code)
+	}
+	if rec := do("GET", "/api/clusters", "", editorCookie); !strings.Contains(rec.Body.String(), `"local"`) {
+		t.Fatalf("list should contain local: %s", rec.Body.String())
+	}
+	if rec := do("PUT", "/api/clusters/prod", `{"kubeconfig":"not: a: kubeconfig"}`, adminCookie); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid kubeconfig: status = %d, want 400", rec.Code)
+	}
+	rec := do("PUT", "/api/clusters/prod", string(body), adminCookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upsert: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"connected":false`) {
+		t.Fatalf("unreachable cluster should report connected=false: %s", rec.Body.String())
+	}
+	sec, err := kube.CoreV1().Secrets("ns1").Get(context.Background(), "clusters", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("secret not created: %v", err)
+	}
+	if string(sec.Data["prod"]) != kubeconfig {
+		t.Fatalf("stored kubeconfig mismatch: %q", sec.Data["prod"])
+	}
+	if rec := do("GET", "/api/clusters", "", adminCookie); !strings.Contains(rec.Body.String(), `"prod"`) {
+		t.Fatalf("list should contain prod: %s", rec.Body.String())
+	}
+	if rec := do("DELETE", "/api/clusters/local", "", adminCookie); rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete local: status = %d, want 400", rec.Code)
+	}
+	if rec := do("DELETE", "/api/clusters/prod", "", adminCookie); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	sec, _ = kube.CoreV1().Secrets("ns1").Get(context.Background(), "clusters", metav1.GetOptions{})
+	if _, stillThere := sec.Data["prod"]; stillThere {
+		t.Fatal("prod key should be deleted")
 	}
 }

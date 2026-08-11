@@ -29,12 +29,16 @@ type Server struct {
 	sessions   *auth.Sessions
 	accountsCM AccountsCMRef // 비밀번호 변경이 patch할 계정 ConfigMap (빈 값이면 변경 불가)
 
+	clustersSecret ClustersSecretRef        // 원격 클러스터 kubeconfig Secret (빈 값이면 local만)
+	clusterMu      sync.Mutex               // clusterCache 보호
+	clusterCache   map[string]ClientSource  // 클러스터명 → 팩토리 (지연 생성)
+
 	auditMu  sync.Mutex
 	auditLog []AuditEntry // newest first, capped at auditKeep
 }
 
-func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *auth.Sessions, accountsCM AccountsCMRef) *Server {
-	return &Server{dev: dev, factory: factory, accounts: accounts, sessions: sessions, accountsCM: accountsCM}
+func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *auth.Sessions, accountsCM AccountsCMRef, clustersSecret ClustersSecretRef) *Server {
+	return &Server{dev: dev, factory: factory, accounts: accounts, sessions: sessions, accountsCM: accountsCM, clustersSecret: clustersSecret}
 }
 
 // Routes registers the /api/* handlers on mux. Probes, /metrics and static assets
@@ -48,6 +52,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/accounts", s.handleAccountsList)
 	mux.HandleFunc("PUT /api/accounts/{name}", s.handleAccountUpsert)
 	mux.HandleFunc("DELETE /api/accounts/{name}", s.handleAccountDelete)
+	// 멀티클러스터 — 목록은 로그인 사용자 전체, 등록/삭제는 admin 전용.
+	mux.HandleFunc("GET /api/clusters", s.handleClustersList)
+	mux.HandleFunc("PUT /api/clusters/{name}", s.handleClusterUpsert)
+	mux.HandleFunc("DELETE /api/clusters/{name}", s.handleClusterDelete)
 	mux.Handle("GET /api/capabilities", s.withAuth(http.HandlerFunc(s.handleCapabilities)))
 	mux.Handle("GET /api/resourceTypes", s.withAuth(http.HandlerFunc(s.handleResourceTypes)))
 	mux.Handle("GET /api/resourceTypes/{type}/schema", s.withAuth(http.HandlerFunc(s.handleResourceSchema)))
@@ -96,12 +104,22 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "Forbidden", "viewer 역할은 변경할 수 없습니다")
 			return
 		}
-		client, err := s.factory.Base()
+		// ?cluster= 로 대상 클러스터를 고른다 (빈 값/local = 파드가 있는 클러스터).
+		cluster := r.URL.Query().Get("cluster")
+		factory, err := s.clusterSource(r.Context(), cluster)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BadRequest", err.Error())
+			return
+		}
+		client, err := factory.Base()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Internal", err.Error())
 			return
 		}
-		ctx := withIdentity(withClient(r.Context(), client), id)
+		ctx := withIdentity(withFactory(withClient(r.Context(), client), factory), id)
+		if cluster != "" && cluster != "local" {
+			ctx = withCluster(ctx, cluster)
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

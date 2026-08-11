@@ -20,6 +20,10 @@ service:
 # 참고). 한 키 = 한 사용자, 값 = "role:bcryptHash" (role: admin|editor|viewer).
 accountsConfigMap: istio-dashboard-accounts
 
+# 멀티클러스터: 원격 클러스터 kubeconfig를 담는 Secret 이름 (key = 클러스터명,
+# value = kubeconfig). 설정 페이지의 클러스터 등록 UI가 이 Secret을 관리한다.
+clustersSecret: istio-dashboard-clusters
+
 resources:
   requests:
     cpu: 50m
