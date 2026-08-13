@@ -96,6 +96,11 @@ html.dark body {
     stroke-dasharray: 7 5;
     animation: flow-dash 0.9s linear infinite;
   }
+  .flow-edge-hi { stroke: rgb(var(--accent-ring)); }
+  .flow-node-selected {
+    border-color: rgb(var(--accent-ring));
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.15), 0 4px 12px rgb(0 0 0 / 0.08);
+  }
 }
 
 @keyframes flow-dash {

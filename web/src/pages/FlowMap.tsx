@@ -10,13 +10,14 @@ import {
 import { Icon } from '../components/icons'
 
 type Edge = { from: string; to: string; broken?: boolean }
+type Offsets = Record<string, { x: number; y: number }>
 
 // 노드 DOM 위치를 측정해 SVG 베지어 곡선으로 잇는 캔버스. setRef(id)로 노드를
-// 등록하고 edges의 from/to id를 연결한다.
-function useFlowCanvas(edges: Edge[]) {
+// 등록하고 edges의 from/to id를 연결한다. offsets(드래그)가 바뀌면 다시 그린다.
+function useFlowCanvas(edges: Edge[], offsets: Offsets) {
   const containerRef = useRef<HTMLDivElement>(null)
   const nodeRefs = useRef(new Map<string, HTMLElement>())
-  const [paths, setPaths] = useState<{ key: string; d: string; broken?: boolean }[]>([])
+  const [paths, setPaths] = useState<{ key: string; from: string; to: string; d: string; broken?: boolean }[]>([])
 
   useLayoutEffect(() => {
     const draw = () => {
@@ -24,7 +25,7 @@ function useFlowCanvas(edges: Edge[]) {
       if (!c) return
       const cb = c.getBoundingClientRect()
       const seen = new Set<string>()
-      const out: { key: string; d: string; broken?: boolean }[] = []
+      const out: typeof paths = []
       for (const e of edges) {
         const key = `${e.from}→${e.to}`
         if (seen.has(key)) continue
@@ -37,20 +38,43 @@ function useFlowCanvas(edges: Edge[]) {
         const x2 = b.left - cb.left
         const y2 = b.top + b.height / 2 - cb.top
         const mx = (x1 + x2) / 2
-        out.push({ key, broken: e.broken, d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}` })
+        out.push({ key, from: e.from, to: e.to, broken: e.broken, d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}` })
       }
       setPaths(out)
     }
     draw()
     window.addEventListener('resize', draw)
     return () => window.removeEventListener('resize', draw)
-  }, [edges])
+  }, [edges, offsets])
 
   const setRef = (id: string) => (el: HTMLElement | null) => {
     if (el) nodeRefs.current.set(id, el)
     else nodeRefs.current.delete(id)
   }
   return { containerRef, setRef, paths }
+}
+
+// 선택 노드의 상류(유입 경로) + 하류(유출 경로) 집합. 형제 경로는 포함하지 않는다.
+function computeHighlight(selected: string | null, edges: Edge[]) {
+  if (!selected) return null
+  const fwd = new Map<string, string[]>()
+  const rev = new Map<string, string[]>()
+  for (const e of edges) {
+    fwd.set(e.from, [...(fwd.get(e.from) ?? []), e.to])
+    rev.set(e.to, [...(rev.get(e.to) ?? []), e.from])
+  }
+  const nodes = new Set([selected])
+  const walk = (adj: Map<string, string[]>) => {
+    const q = [selected]
+    while (q.length) {
+      for (const n of adj.get(q.pop() as string) ?? []) {
+        if (!nodes.has(n)) { nodes.add(n); q.push(n) }
+      }
+    }
+  }
+  walk(fwd)
+  walk(rev)
+  return nodes
 }
 
 const gwId = (g: FlowGateway) => `${g.namespace}/${g.name}`
@@ -102,7 +126,7 @@ export function FlowMap() {
       <div>
         <h2 className="text-xl font-semibold text-strong">트래픽 흐름</h2>
         <p className="mt-1 text-sm text-muted">
-          라우팅 설정으로 본 인그레스/이그레스 경로. 실제 트래픽 양이 아니라 리소스 연결을 그린다.
+          라우팅 설정으로 본 인그레스/이그레스 경로. 노드를 클릭하면 관련 경로만 부각되고, 드래그로 옮길 수 있다.
         </p>
       </div>
 
@@ -114,7 +138,7 @@ export function FlowMap() {
       {(ingress.gws.length > 0 || ingress.rts.length > 0) && (
         <FlowSection
           title="인그레스"
-          srcLabel="Internet"
+          srcLabel="External"
           srcIcon="bolt"
           gateways={ingress.gws}
           routes={ingress.rts}
@@ -140,9 +164,54 @@ export function FlowMap() {
   )
 }
 
-// 아이콘 칩 + 제목/메타/배지로 이루어진 노드 카드 공통 틀
+// 드래그(이동) + 클릭(선택)을 분리하는 래퍼. 3px 이상 움직이면 드래그로 보고
+// 클릭 선택을 무시한다. 카드 안의 링크는 stopPropagation으로 드래그를 피한다.
+function DraggableNode({
+  id, offsets, setOffsets, onSelect, dimmed, nodeRef, children, className = '',
+}: {
+  id: string
+  offsets: Offsets
+  setOffsets: React.Dispatch<React.SetStateAction<Offsets>>
+  onSelect: () => void
+  dimmed: boolean
+  nodeRef: (el: HTMLElement | null) => void
+  children: ReactNode
+  className?: string
+}) {
+  const drag = useRef<{ px: number; py: number; ox: number; oy: number; moved: boolean } | null>(null)
+  const o = offsets[id] ?? { x: 0, y: 0 }
+  return (
+    <div
+      ref={nodeRef}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        drag.current = { px: e.clientX, py: e.clientY, ox: o.x, oy: o.y, moved: false }
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current
+        if (!d) return
+        const dx = e.clientX - d.px
+        const dy = e.clientY - d.py
+        if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
+        if (d.moved) setOffsets((prev) => ({ ...prev, [id]: { x: d.ox + dx, y: d.oy + dy } }))
+      }}
+      onPointerUp={() => {
+        const d = drag.current
+        drag.current = null
+        if (!d?.moved) onSelect()
+      }}
+      style={{ transform: `translate(${o.x}px, ${o.y}px)`, touchAction: 'none' }}
+      className={`cursor-grab select-none transition-opacity active:cursor-grabbing ${dimmed ? 'opacity-25' : ''} ${className}`}
+    >
+      {children}
+    </div>
+  )
+}
+
+// 아이콘 칩 + 제목/메타/배지 노드 카드. to가 있으면 호버 시 ↗ 링크 표시.
 function NodeCard({
-  icon, iconClass, title, meta, badge, to, nodeRef,
+  icon, iconClass, title, meta, badge, to, selected,
 }: {
   icon: string
   iconClass: string
@@ -150,24 +219,34 @@ function NodeCard({
   meta: ReactNode
   badge?: ReactNode
   to?: string
-  nodeRef: (el: HTMLElement | null) => void
+  selected: boolean
 }) {
-  const body = (
-    <div className="flex items-start gap-2.5">
-      <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
-        <Icon name={icon} className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-strong">{title}</div>
-        <div className="mt-0.5 truncate text-xs text-muted">{meta}</div>
-        {badge && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{badge}</div>}
+  return (
+    <div className={`flow-node group relative w-64 ${selected ? 'flow-node-selected' : ''}`}>
+      <div className="flex items-start gap-2.5">
+        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
+          <Icon name={icon} className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-strong">{title}</div>
+          <div className="mt-0.5 truncate text-xs text-muted">{meta}</div>
+          {badge && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{badge}</div>}
+        </div>
       </div>
+      {to && (
+        <Link
+          to={to}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          title="리소스 열기"
+          className="absolute right-2 top-2 rounded-md p-1 text-faint opacity-0 transition hover:bg-accent-soft hover:text-accent group-hover:opacity-100"
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
+            <path d="M8 5h7v7M15 5l-8 8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+      )}
     </div>
-  )
-  return to ? (
-    <Link ref={nodeRef as never} to={to} className="flow-node w-64">{body}</Link>
-  ) : (
-    <div ref={nodeRef} className="flow-node w-64">{body}</div>
   )
 }
 
@@ -197,45 +276,62 @@ function FlowSection({
   serviceEntries: FlowServiceEntry[]
   edges: Edge[]
 }) {
-  const { containerRef, setRef, paths } = useFlowCanvas(edges)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [offsets, setOffsets] = useState<Offsets>({})
+  const { containerRef, setRef, paths } = useFlowCanvas(edges, offsets)
+  const highlight = useMemo(() => computeHighlight(selected, edges), [selected, edges])
+
+  const dimmed = (id: string) => !!highlight && !highlight.has(id)
+  const select = (id: string) => () => setSelected((cur) => (cur === id ? null : id))
+  const nodeProps = (id: string) => ({
+    id, offsets, setOffsets, onSelect: select(id), dimmed: dimmed(id), nodeRef: setRef(id),
+  })
 
   return (
-    <div className="flow-canvas">
+    <div className="flow-canvas" onClick={() => setSelected(null)}>
       <h3 className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-faint">{title}</h3>
       <div ref={containerRef} className="relative">
         <svg className="pointer-events-none absolute inset-0 h-full w-full">
-          {paths.map((p) => (
-            <path
-              key={p.key}
-              d={p.d}
-              fill="none"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              className={`flow-edge ${p.broken ? 'stroke-red-400/70' : 'stroke-gray-400/50 dark:stroke-slate-500/60'}`}
-            />
-          ))}
+          {paths.map((p) => {
+            const onPath = highlight && highlight.has(p.from) && highlight.has(p.to)
+            return (
+              <path
+                key={p.key}
+                d={p.d}
+                fill="none"
+                strokeWidth={onPath ? 2 : 1.5}
+                strokeLinecap="round"
+                className={`flow-edge transition-opacity ${
+                  p.broken ? 'stroke-red-400/70' : onPath ? 'flow-edge-hi' : 'stroke-gray-400/50 dark:stroke-slate-500/60'
+                } ${highlight && !onPath ? 'opacity-10' : ''}`}
+              />
+            )
+          })}
         </svg>
         <div className="relative flex items-start gap-16">
-          <div className="flex w-24 shrink-0 flex-col items-center self-center" ref={setRef('src')}>
-            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg" style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}>
-              <Icon name={srcIcon} className="h-6 w-6" />
-            </span>
-            <span className="mt-2 text-xs font-medium text-muted">{srcLabel}</span>
-          </div>
+          <DraggableNode {...nodeProps('src')} className="w-24 shrink-0 self-center">
+            <div className="flex flex-col items-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg" style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}>
+                <Icon name={srcIcon} className="h-6 w-6" />
+              </span>
+              <span className="mt-2 text-xs font-medium text-muted">{srcLabel}</span>
+            </div>
+          </DraggableNode>
 
           {gateways.length > 0 && (
             <div className="flex min-w-0 flex-col gap-5">
               {gateways.map((g) => (
-                <NodeCard
-                  key={gwId(g)}
-                  nodeRef={setRef(`g:${gwId(g)}`)}
-                  to={`/resources/${g.typeId}/${g.namespace}/${g.name}`}
-                  icon="shield"
-                  iconClass="bg-blue-500/10 text-blue-500"
-                  title={g.name}
-                  meta={`${g.kind === 'IstioGateway' ? 'Istio Gateway' : 'Gateway API'} · ${g.namespace}`}
-                  badge={g.hosts.length > 0 && <Pill tone="accent">{g.hosts.join(', ')}</Pill>}
-                />
+                <DraggableNode key={gwId(g)} {...nodeProps(`g:${gwId(g)}`)}>
+                  <NodeCard
+                    selected={selected === `g:${gwId(g)}`}
+                    to={`/resources/${g.typeId}/${g.namespace}/${g.name}`}
+                    icon="shield"
+                    iconClass="bg-blue-500/10 text-blue-500"
+                    title={g.name}
+                    meta={`${g.kind === 'IstioGateway' ? 'Istio Gateway' : 'Gateway API'} · ${g.namespace}`}
+                    badge={g.hosts.length > 0 && <Pill tone="accent">{g.hosts.join(', ')}</Pill>}
+                  />
+                </DraggableNode>
               ))}
             </div>
           )}
@@ -243,57 +339,60 @@ function FlowSection({
           {routes.length > 0 && (
             <div className="flex min-w-0 flex-col gap-5">
               {routes.map((r) => (
-                <NodeCard
-                  key={routeId(r)}
-                  nodeRef={setRef(routeId(r))}
-                  to={`/resources/${r.typeId}/${r.namespace}/${r.name}`}
-                  icon="bolt"
-                  iconClass="bg-violet-500/10 text-violet-500"
-                  title={r.hosts.length > 0 ? r.hosts.join(', ') : r.name}
-                  meta={`${r.kind} · ${r.namespace}/${r.name}`}
-                />
+                <DraggableNode key={routeId(r)} {...nodeProps(routeId(r))}>
+                  <NodeCard
+                    selected={selected === routeId(r)}
+                    to={`/resources/${r.typeId}/${r.namespace}/${r.name}`}
+                    icon="bolt"
+                    iconClass="bg-violet-500/10 text-violet-500"
+                    title={r.hosts.length > 0 ? r.hosts.join(', ') : r.name}
+                    meta={`${r.kind} · ${r.namespace}/${r.name}`}
+                  />
+                </DraggableNode>
               ))}
             </div>
           )}
 
           <div className="flex min-w-0 flex-col gap-5">
             {[...backends.entries()].map(([id, b]) => (
-              <NodeCard
-                key={id}
-                nodeRef={setRef(id)}
-                icon="cube"
-                iconClass={
-                  b.external
-                    ? 'bg-gray-500/10 text-gray-500 dark:text-slate-400'
-                    : backendBroken(b)
-                      ? 'bg-red-500/10 text-red-500'
-                      : 'bg-emerald-500/10 text-emerald-500'
-                }
-                title={<>{b.name}{b.port ? <span className="font-normal text-muted">:{b.port}</span> : null}</>}
-                meta={b.external ? '외부 호스트' : `Service · ${b.namespace}`}
-                badge={
-                  b.external ? (
-                    b.serviceEntry && <Pill tone="accent">ServiceEntry {b.serviceEntry}</Pill>
-                  ) : !b.exists ? (
-                    <Pill tone="warn"><Dot tone="warn" /> 서비스 없음</Pill>
-                  ) : b.endpoints === 0 ? (
-                    <Pill tone="warn"><Dot tone="warn" /> 엔드포인트 0</Pill>
-                  ) : (
-                    <Pill tone="ok"><Dot tone="ok" /> 엔드포인트 {b.endpoints}</Pill>
-                  )
-                }
-              />
+              <DraggableNode key={id} {...nodeProps(id)}>
+                <NodeCard
+                  selected={selected === id}
+                  icon="cube"
+                  iconClass={
+                    b.external
+                      ? 'bg-gray-500/10 text-gray-500 dark:text-slate-400'
+                      : backendBroken(b)
+                        ? 'bg-red-500/10 text-red-500'
+                        : 'bg-emerald-500/10 text-emerald-500'
+                  }
+                  title={<>{b.name}{b.port ? <span className="font-normal text-muted">:{b.port}</span> : null}</>}
+                  meta={b.external ? '외부 호스트' : `Service · ${b.namespace}`}
+                  badge={
+                    b.external ? (
+                      b.serviceEntry && <Pill tone="accent">ServiceEntry {b.serviceEntry}</Pill>
+                    ) : !b.exists ? (
+                      <Pill tone="warn"><Dot tone="warn" /> 서비스 없음</Pill>
+                    ) : b.endpoints === 0 ? (
+                      <Pill tone="warn"><Dot tone="warn" /> 엔드포인트 0</Pill>
+                    ) : (
+                      <Pill tone="ok"><Dot tone="ok" /> 엔드포인트 {b.endpoints}</Pill>
+                    )
+                  }
+                />
+              </DraggableNode>
             ))}
             {serviceEntries.map((se) => (
-              <NodeCard
-                key={`${se.namespace}/${se.name}`}
-                nodeRef={setRef(`se:${se.namespace}/${se.name}`)}
-                to={`/resources/${se.typeId}/${se.namespace}/${se.name}`}
-                icon="chart"
-                iconClass="bg-emerald-500/10 text-emerald-500"
-                title={se.hosts.join(', ') || se.name}
-                meta={`ServiceEntry · ${se.namespace}/${se.name}`}
-              />
+              <DraggableNode key={`${se.namespace}/${se.name}`} {...nodeProps(`se:${se.namespace}/${se.name}`)}>
+                <NodeCard
+                  selected={selected === `se:${se.namespace}/${se.name}`}
+                  to={`/resources/${se.typeId}/${se.namespace}/${se.name}`}
+                  icon="chart"
+                  iconClass="bg-emerald-500/10 text-emerald-500"
+                  title={se.hosts.join(', ') || se.name}
+                  meta={`ServiceEntry · ${se.namespace}/${se.name}`}
+                />
+              </DraggableNode>
             ))}
           </div>
         </div>
