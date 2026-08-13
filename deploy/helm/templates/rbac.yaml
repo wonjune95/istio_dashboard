@@ -26,9 +26,9 @@ rules:
       - gateway.networking.k8s.io
     resources: ["*"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # 폼 드롭다운·네임스페이스 선택용 읽기
+  # 폼 드롭다운·네임스페이스 선택용 읽기 + 흐름도의 ready 엔드포인트 수
   - apiGroups: [""]
-    resources: ["namespaces", "services"]
+    resources: ["namespaces", "services", "endpoints"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

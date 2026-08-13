@@ -19,8 +19,11 @@ export function Sidebar() {
       <NavLink to="/" end className={topLink()}>
         <Icon name="home" className="h-4 w-4" /> 홈
       </NavLink>
-      <NavLink to="/overview" className={topLink('mb-3')}>
+      <NavLink to="/overview" className={topLink()}>
         <Icon name="grid" className="h-4 w-4" /> 전체 보기
+      </NavLink>
+      <NavLink to="/flowmap" className={topLink('mb-3')}>
+        <Icon name="bolt" className="h-4 w-4" /> 트래픽 흐름
       </NavLink>
 
       {isLoading && <div className="px-2 text-xs text-faint">로딩 중…</div>}

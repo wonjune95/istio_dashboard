@@ -25,6 +25,12 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	istioapi "istio.io/api/networking/v1"
+	istionet "istio.io/client-go/pkg/apis/networking/v1"
+	istiofake "istio.io/client-go/pkg/clientset/versioned/fake"
+	gwapi "sigs.k8s.io/gateway-api/apis/v1"
+	gwfake "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned/fake"
+
 	"istio-dashboard/internal/auth"
 	"istio-dashboard/internal/k8s"
 )
@@ -534,5 +540,87 @@ current-context: x
 	sec, _ = kube.CoreV1().Secrets("ns1").Get(context.Background(), "clusters", metav1.GetOptions{})
 	if _, stillThere := sec.Data["prod"]; stillThere {
 		t.Fatal("prod key should be deleted")
+	}
+}
+
+// Flow map: istio Gateway + attached VS with a resolvable backend appear in the
+// graph (exists + endpoint count); mesh-only VS is excluded from the ingress flow.
+func TestFlowMap(t *testing.T) {
+	kube := kubefake.NewClientset(
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "petclinic", Namespace: "dev"}},
+		&corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "petclinic", Namespace: "dev"},
+			Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "10.0.0.1"}, {IP: "10.0.0.2"}}}}},
+	)
+	istio := istiofake.NewSimpleClientset(
+		&istionet.VirtualService{ObjectMeta: metav1.ObjectMeta{Name: "shop", Namespace: "dev"},
+			Spec: istioapi.VirtualService{
+				Hosts:    []string{"shop.example.com"},
+				Gateways: []string{"istio-system/ingressgw"},
+				Http: []*istioapi.HTTPRoute{{Route: []*istioapi.HTTPRouteDestination{
+					{Destination: &istioapi.Destination{Host: "petclinic"}}}}},
+			}},
+		&istionet.VirtualService{ObjectMeta: metav1.ObjectMeta{Name: "mesh-only", Namespace: "dev"},
+			Spec: istioapi.VirtualService{Hosts: []string{"internal"}, Gateways: []string{"mesh"}}},
+	)
+	// istio fake는 시딩 시 Gateway kind를 잘못 버킷팅한다(버전 alias quirk) — typed Create로 넣는다.
+	if _, err := istio.NetworkingV1().Gateways("istio-system").Create(context.Background(),
+		&istionet.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "ingressgw", Namespace: "istio-system"},
+			Spec: istioapi.Gateway{Servers: []*istioapi.Server{{Hosts: []string{"shop.example.com"}}}}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	gw := gwfake.NewSimpleClientset(
+		&gwapi.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "hr", Namespace: "dev"},
+			Spec: gwapi.HTTPRouteSpec{
+				Hostnames: []gwapi.Hostname{"api.example.com"},
+				CommonRouteSpec: gwapi.CommonRouteSpec{ParentRefs: []gwapi.ParentReference{{Name: "tgw"}}},
+				Rules: []gwapi.HTTPRouteRule{{BackendRefs: []gwapi.HTTPBackendRef{
+					{BackendRef: gwapi.BackendRef{BackendObjectReference: gwapi.BackendObjectReference{Name: "missing-svc"}}}}}},
+			}},
+	)
+	mux := newTestMux(t, &stubSource{clients: &k8s.Clients{Kube: kube, Istio: istio, Gateway: gw}})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, authedReq("GET", "/api/flowmap", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Gateways []struct{ Name string }
+		Routes   []struct {
+			Name     string
+			Gateways []string
+			Backends []struct {
+				Name      string
+				Exists    bool
+				Endpoints int
+			}
+		}
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Gateways) != 1 || out.Gateways[0].Name != "ingressgw" {
+		t.Fatalf("gateways = %+v", out.Gateways)
+	}
+	if len(out.Routes) != 2 {
+		t.Fatalf("mesh-only VS should be excluded, routes = %+v", out.Routes)
+	}
+	for _, rt := range out.Routes {
+		switch rt.Name {
+		case "shop":
+			b := rt.Backends[0]
+			if !b.Exists || b.Endpoints != 2 || b.Name != "petclinic" {
+				t.Fatalf("shop backend = %+v", b)
+			}
+			if rt.Gateways[0] != "istio-system/ingressgw" {
+				t.Fatalf("shop gateways = %v", rt.Gateways)
+			}
+		case "hr":
+			if rt.Backends[0].Exists {
+				t.Fatal("missing-svc should not exist")
+			}
+			if rt.Gateways[0] != "dev/tgw" {
+				t.Fatalf("hr gateways = %v", rt.Gateways)
+			}
+		}
 	}
 }
