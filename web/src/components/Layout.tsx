@@ -21,8 +21,8 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className="flex h-screen flex-col">
       <header className="flex h-14 items-center gap-3 border-b border-base bg-white/80 px-4 backdrop-blur-md dark:bg-slate-950/80">
         <Link to="/" className="flex items-center gap-2.5 rounded-md py-0.5 hover:opacity-80" title="홈으로">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">☸</span>
-          <h1 className="text-base font-semibold tracking-tight text-strong">Istio Dashboard</h1>
+          <img src="/favicon.svg" alt="" className="h-7 w-7" />
+          <h1 className="text-base font-semibold tracking-tight text-strong">Periplus</h1>
         </Link>
 
         {/* no global namespace selector — Overview/ResourceList carry their own

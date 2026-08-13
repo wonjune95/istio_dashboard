@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/wonjune95/istio-dashboard
+  repository: ghcr.io/wonjune95/periplus
   tag: ""              # 비우면 차트 appVersion을 쓴다
   pullPolicy: IfNotPresent
 
@@ -18,11 +18,11 @@ service:
 
 # 로컬 계정 ConfigMap 이름 (헬름이 만들지 않음 — deploy/examples/accounts-configmap.yaml
 # 참고). 한 키 = 한 사용자, 값 = "role:bcryptHash" (role: admin|editor|viewer).
-accountsConfigMap: istio-dashboard-accounts
+accountsConfigMap: periplus-accounts
 
 # 멀티클러스터: 원격 클러스터 kubeconfig를 담는 Secret 이름 (key = 클러스터명,
 # value = kubeconfig). 설정 페이지의 클러스터 등록 UI가 이 Secret을 관리한다.
-clustersSecret: istio-dashboard-clusters
+clustersSecret: periplus-clusters
 
 resources:
   requests:

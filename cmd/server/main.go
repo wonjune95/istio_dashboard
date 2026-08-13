@@ -1,4 +1,4 @@
-// Command server runs the Istio Routing Dashboard: a single binary serving the
+// Command server runs Periplus — a dashboard for Istio · Gateway API: a single binary serving the
 // embedded React SPA and a JSON API over the Kubernetes API (HTTPRoute/VirtualService).
 package main
 
@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"istio-dashboard/internal/api"
-	"istio-dashboard/internal/assets"
-	"istio-dashboard/internal/auth"
-	"istio-dashboard/internal/k8s"
-	"istio-dashboard/internal/observability"
+	"periplus/internal/api"
+	"periplus/internal/assets"
+	"periplus/internal/auth"
+	"periplus/internal/k8s"
+	"periplus/internal/observability"
 )
 
 func main() {
@@ -46,7 +46,7 @@ func main() {
 	// per-boot random key (restart = re-login).
 	accountsDir := os.Getenv("ACCOUNTS_DIR")
 	if accountsDir == "" {
-		accountsDir = "/etc/istio-dashboard/accounts"
+		accountsDir = "/etc/periplus/accounts"
 	}
 	if !*dev {
 		if _, err := os.Stat(accountsDir); err != nil {

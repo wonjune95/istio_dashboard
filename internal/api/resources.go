@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"istio-dashboard/internal/k8s"
+	"periplus/internal/k8s"
 )
 
 // resourceProvider resolves the typeID (resource.group) to an installed type and

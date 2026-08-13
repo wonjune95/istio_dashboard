@@ -5,11 +5,11 @@
 #   (마운트된 ConfigMap은 1분 내 자동 반영).
 #
 # 해시 생성:  go run ./hack/bcrypt-hash.go '비밀번호'
-# 계정 추가:  kubectl -n istio-system edit configmap istio-dashboard-accounts
+# 계정 추가:  kubectl -n istio-system edit configmap periplus-accounts
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: istio-dashboard-accounts
+  name: periplus-accounts
   namespace: istio-system
 data:
   admin: "admin:<bcrypt-hash>"

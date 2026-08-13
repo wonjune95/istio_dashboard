@@ -31,8 +31,8 @@ import (
 	gwapi "sigs.k8s.io/gateway-api/apis/v1"
 	gwfake "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned/fake"
 
-	"istio-dashboard/internal/auth"
-	"istio-dashboard/internal/k8s"
+	"periplus/internal/auth"
+	"periplus/internal/k8s"
 )
 
 var vsGVR = schema.GroupVersionResource{Group: "networking.istio.io", Version: "v1", Resource: "virtualservices"}
@@ -85,7 +85,7 @@ func authedReq(method, path string, body *strings.Reader) *http.Request {
 		r = httptest.NewRequest(method, path, body)
 	}
 	r.AddCookie(&http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "tester", Role: "editor"}, time.Hour),
 	})
 	return r
@@ -130,7 +130,7 @@ func TestWithAuth_BadCookieIs401(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/resourceTypes", nil)
-	req.AddCookie(&http.Cookie{Name: "istio_dash_session", Value: "dGVzdGVy|admin|9999999999|forged"})
+	req.AddCookie(&http.Cookie{Name: "periplus_session", Value: "dGVzdGVy|admin|9999999999|forged"})
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
@@ -144,7 +144,7 @@ func TestWithAuth_ViewerWriteIs403(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/resources/"+vsTypeID, strings.NewReader(vsBody))
 	req.AddCookie(&http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "ro", Role: "viewer"}, time.Hour),
 	})
 	mux.ServeHTTP(rec, req)
@@ -331,7 +331,7 @@ func TestPasswordChange_RoundTrip(t *testing.T) {
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
 		auth.NewStore(dir), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
 	cookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "alice", Role: "viewer"}, time.Hour),
 	}
 
@@ -375,7 +375,7 @@ func TestAccountsAPI_RoundTrip(t *testing.T) {
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
 		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
 	adminCookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
 	}
 	do := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
@@ -388,7 +388,7 @@ func TestAccountsAPI_RoundTrip(t *testing.T) {
 
 	// editor may not manage accounts
 	editorCookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "tester", Role: "editor"}, time.Hour),
 	}
 	if rec := do("GET", "/api/accounts", "", editorCookie); rec.Code != http.StatusForbidden {
@@ -425,7 +425,7 @@ func TestAccountsAPI_RoundTrip(t *testing.T) {
 		t.Fatalf("self-delete: status = %d, want 400", rec.Code)
 	}
 	rootCookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "root", Role: "admin"}, time.Hour),
 	}
 	if rec := do("DELETE", "/api/accounts/admin", "", rootCookie); rec.Code != http.StatusBadRequest {
@@ -477,7 +477,7 @@ func TestClustersAPI_RoundTrip(t *testing.T) {
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
 		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
 	adminCookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
 	}
 	do := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
@@ -494,7 +494,7 @@ func TestClustersAPI_RoundTrip(t *testing.T) {
 		return rec
 	}
 	editorCookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "bob", Role: "editor"}, time.Hour),
 	}
 	kubeconfig := `apiVersion: v1
@@ -689,7 +689,7 @@ func TestMustChangePassword_RoundTrip(t *testing.T) {
 	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
 		auth.NewStore(dir), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{}).Routes(mux)
 	cookie := &http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
 	}
 	caps := func() string {
@@ -729,7 +729,7 @@ func TestClustersList_Status(t *testing.T) {
 		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
 	req := httptest.NewRequest("GET", "/api/clusters?status=true", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "istio_dash_session",
+		Name:  "periplus_session",
 		Value: testSessions.Sign(auth.Identity{Name: "bob", Role: "viewer"}, time.Hour),
 	})
 	rec := httptest.NewRecorder()

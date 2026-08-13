@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"istio-dashboard/internal/auth"
+	"periplus/internal/auth"
 )
 
 const (
-	sessionCookie = "istio_dash_session"
+	sessionCookie = "periplus_session"
 	sessionTTL    = 12 * time.Hour
 )
 

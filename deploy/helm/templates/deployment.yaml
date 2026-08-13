@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}
+  name: {{ include "periplus.fullname" . }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "istio-dashboard.selectorLabels" . | nindent 6 }}
+      {{- include "periplus.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "istio-dashboard.selectorLabels" . | nindent 8 }}
+        {{- include "periplus.selectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "istio-dashboard.fullname" . }}
+      serviceAccountName: {{ include "periplus.fullname" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -39,7 +39,7 @@ spec:
             # ArgoCD 방식 로컬 계정: ConfigMap(accountsConfigMap)을 디렉터리로 마운트.
             # 한 키 = 한 사용자, 값 = "role:bcryptHash". CM 수정만으로 계정 추가/삭제.
             - name: ACCOUNTS_DIR
-              value: /etc/istio-dashboard/accounts
+              value: /etc/periplus/accounts
             # 비밀번호 변경(설정 페이지)이 patch할 계정 ConfigMap 위치
             - name: ACCOUNTS_CONFIGMAP
               value: {{ .Values.accountsConfigMap | quote }}
@@ -77,7 +77,7 @@ spec:
             - name: home
               mountPath: /home/nonroot
             - name: accounts
-              mountPath: /etc/istio-dashboard/accounts
+              mountPath: /etc/periplus/accounts
               readOnly: true
       volumes:
         - name: tmp

@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}
+  name: {{ include "periplus.fullname" . }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 ---
 # ArgoCD 방식: 모든 클러스터 작업은 이 SA 하나로 수행하고, 사용자 권한은 앱의
 # 역할(admin/editor/viewer)이 결정한다. 따라서 SA가 관리 대상 CRD 전체의 CRUD
@@ -11,9 +11,9 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}
+  name: {{ include "periplus.fullname" . }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
@@ -34,26 +34,26 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}
+  name: {{ include "periplus.fullname" . }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "istio-dashboard.fullname" . }}
+  name: {{ include "periplus.fullname" . }}
 subjects:
   - kind: ServiceAccount
-    name: {{ include "istio-dashboard.fullname" . }}
+    name: {{ include "periplus.fullname" . }}
     namespace: {{ .Release.Namespace }}
 ---
 # 설정 페이지의 비밀번호 변경이 계정 ConfigMap을 patch할 수 있게 한다 (해당 CM 한정).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}-accounts-writer
+  name: {{ include "periplus.fullname" . }}-accounts-writer
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -76,17 +76,17 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}-accounts-writer
+  name: {{ include "periplus.fullname" . }}-accounts-writer
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "istio-dashboard.fullname" . }}-accounts-writer
+  name: {{ include "periplus.fullname" . }}-accounts-writer
 subjects:
   - kind: ServiceAccount
-    name: {{ include "istio-dashboard.fullname" . }}
+    name: {{ include "periplus.fullname" . }}
     namespace: {{ .Release.Namespace }}
 ---
 # Read istiod's Deployment (image tag → 홈 화면의 컨트롤플레인 버전 표시).
@@ -94,10 +94,10 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}-istiod-reader
+  name: {{ include "periplus.fullname" . }}-istiod-reader
   namespace: {{ .Values.istioNamespace }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
@@ -106,15 +106,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "istio-dashboard.fullname" . }}-istiod-reader
+  name: {{ include "periplus.fullname" . }}-istiod-reader
   namespace: {{ .Values.istioNamespace }}
   labels:
-    {{- include "istio-dashboard.labels" . | nindent 4 }}
+    {{- include "periplus.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "istio-dashboard.fullname" . }}-istiod-reader
+  name: {{ include "periplus.fullname" . }}-istiod-reader
 subjects:
   - kind: ServiceAccount
-    name: {{ include "istio-dashboard.fullname" . }}
+    name: {{ include "periplus.fullname" . }}
     namespace: {{ .Release.Namespace }}

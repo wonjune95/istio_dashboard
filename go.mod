@@ -1,4 +1,4 @@
-module istio-dashboard
+module periplus
 
 go 1.26.4
 
