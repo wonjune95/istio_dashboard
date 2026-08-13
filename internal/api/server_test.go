@@ -424,6 +424,13 @@ func TestAccountsAPI_RoundTrip(t *testing.T) {
 	if rec := do("DELETE", "/api/accounts/admin", "", adminCookie); rec.Code != http.StatusBadRequest {
 		t.Fatalf("self-delete: status = %d, want 400", rec.Code)
 	}
+	rootCookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "root", Role: "admin"}, time.Hour),
+	}
+	if rec := do("DELETE", "/api/accounts/admin", "", rootCookie); rec.Code != http.StatusBadRequest {
+		t.Fatalf("admin 계정은 누구도 삭제 못해야 함: %d", rec.Code)
+	}
 	if rec := do("DELETE", "/api/accounts/bob", "", adminCookie); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: status = %d, want 204: %s", rec.Code, rec.Body.String())
 	}

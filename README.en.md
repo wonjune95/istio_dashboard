@@ -51,7 +51,7 @@ sequenceDiagram
 ```
 
 - **Local accounts = ConfigMap** — one key in the `istio-dashboard-accounts` ConfigMap is one account (`username: "role:bcryptHash"`). Stored in the cluster (etcd), not the pod, so **accounts survive restarts and redeploys**; Helm doesn't manage this CM so upgrades keep it. Changes propagate through the mounted volume **within ~1 minute, no restart**.
-- **Account management UI** — admins can add accounts, change roles/passwords, and delete accounts from the settings page (`GET/PUT/DELETE /api/accounts`; the server patches the CM). Self-deletion and self role-change are blocked to prevent lockout. `kubectl edit` works too.
+- **Account management UI** — admins can add accounts, change roles/passwords, and delete accounts from the settings page (`GET/PUT/DELETE /api/accounts`; the server patches the CM). Self-deletion, self role-change, and deleting the `admin` account are blocked to prevent lockout. `kubectl edit` works too.
 - **Initial admin + forced change** — if no admin account exists at boot, `admin`/`admin` is created. Logging in with the initial password **locks the UI to a password-change screen** until you change it.
 - **Three roles** — `viewer` (read-only) · `editor` (can write) · `admin`. The server gates every mutating request by role (403) and the UI disables buttons using the same information.
 - **Change your own password** — user chip in the header → settings page, after verifying the current password (viewers included). The server patches only your own CM key.
@@ -141,7 +141,7 @@ On first boot the initial account **`admin` / `admin`** is created. Logging in t
 ![Login](docs/screenshot-login.png)
 
 ### 5) Add accounts
-As admin, use **settings → account management** to add accounts and change roles/passwords in the UI (self-delete and self role-change are blocked). The store is still a ConfigMap, so kubectl works too:
+As admin, use **settings → account management** to add accounts and change roles/passwords in the UI (self-delete, self role-change, and deleting `admin` are blocked). The store is still a ConfigMap, so kubectl works too:
 ```bash
 go run ./hack/bcrypt-hash.go 'password'                      # generate bcrypt hash
 # (without Go) htpasswd -bnBC 10 "" 'password' | tr -d ':\n'

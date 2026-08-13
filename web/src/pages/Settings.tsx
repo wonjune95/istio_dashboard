@@ -259,7 +259,7 @@ function AccountsPanel({ me }: { me: string }) {
                 <td className="py-1.5 text-right">
                   <button
                     onClick={() => remove(a.name)}
-                    disabled={a.name === me}
+                    disabled={a.name === me || a.name === 'admin'}
                     className="text-xs text-red-600 hover:underline disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
                   >
                     삭제

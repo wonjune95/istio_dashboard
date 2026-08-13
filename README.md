@@ -51,7 +51,7 @@ sequenceDiagram
 ```
 
 - **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 파드가 아니라 클러스터(etcd)에 저장되므로 **파드 재시작·재배포에도 계정은 유지**되고, 헬름이 이 CM을 관리하지 않아 upgrade에도 살아남는다. 변경은 마운트 동기화로 **재시작 없이 1분 내 반영**된다.
-- **계정 관리 UI** — admin은 설정 페이지에서 계정 추가·역할/비밀번호 변경·삭제를 할 수 있다(`GET/PUT/DELETE /api/accounts`, 서버가 CM을 patch). 잠금 방지를 위해 본인 삭제·본인 역할 변경은 차단. 물론 `kubectl edit`으로도 가능하다.
+- **계정 관리 UI** — admin은 설정 페이지에서 계정 추가·역할/비밀번호 변경·삭제를 할 수 있다(`GET/PUT/DELETE /api/accounts`, 서버가 CM을 patch). 잠금 방지를 위해 본인 삭제·본인 역할 변경·`admin` 계정 삭제는 차단. 물론 `kubectl edit`으로도 가능하다.
 - **초기 admin 자동 생성 + 변경 강제** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 초기 비밀번호 그대로 로그인하면 **비밀번호 변경 화면에 고정**되어 바꾸기 전까지 아무것도 할 수 없다.
 - **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
 - **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
@@ -141,7 +141,7 @@ kubectl apply -f deploy/examples/httproute.yaml
 ![로그인 화면](docs/screenshot-login.png)
 
 ### 5) 계정 추가
-admin으로 로그인하면 **설정 페이지의 계정 관리**에서 계정 추가·역할/비밀번호 변경·삭제를 UI로 할 수 있다 (본인 삭제·본인 역할 변경은 잠금 방지를 위해 차단). 저장소는 여전히 ConfigMap이므로 kubectl로도 가능하다:
+admin으로 로그인하면 **설정 페이지의 계정 관리**에서 계정 추가·역할/비밀번호 변경·삭제를 UI로 할 수 있다 (본인 삭제·본인 역할 변경·`admin` 계정 삭제는 잠금 방지를 위해 차단). 저장소는 여전히 ConfigMap이므로 kubectl로도 가능하다:
 ```bash
 go run ./hack/bcrypt-hash.go '비밀번호'                      # bcrypt 해시 생성
 # (Go가 없으면) htpasswd -bnBC 10 "" '비밀번호' | tr -d ':\n'

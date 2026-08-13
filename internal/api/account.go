@@ -292,6 +292,10 @@ func (s *Server) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	if name == "admin" {
+		writeError(w, http.StatusBadRequest, "BadRequest", "admin 계정은 삭제할 수 없습니다")
+		return
+	}
 	if name == id.Name {
 		writeError(w, http.StatusBadRequest, "BadRequest", "본인 계정은 삭제할 수 없습니다")
 		return
