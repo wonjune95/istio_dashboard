@@ -23,3 +23,9 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker push "$IMG:$TAG"
           docker push "$IMG:latest"
+      - name: Push Helm chart (OCI)
+        run: |
+          TAG=${GITHUB_REF_NAME#v}
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          helm package deploy/helm --version "$TAG" --app-version "$TAG"
+          helm push "istio-dashboard-$TAG.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"

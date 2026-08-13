@@ -664,3 +664,80 @@ func TestFlowMap(t *testing.T) {
 		}
 	}
 }
+
+// Initial-password guard: capabilities flags mustChangePassword while the
+// account's password is "admin"; changing it clears the flag immediately
+// (마운트 동기화를 기다리지 않는 인메모리 마킹).
+func TestMustChangePassword_RoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.MinCost)
+	if err := os.WriteFile(filepath.Join(dir, "admin"), []byte("admin:"+string(hash)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kube := kubefake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "accounts", Namespace: "ns1"},
+		Data:       map[string]string{"admin": "admin:" + string(hash)},
+	})
+	mux := http.NewServeMux()
+	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(dir), testSessions, AccountsCMRef{Namespace: "ns1", Name: "accounts"}, ClustersSecretRef{}).Routes(mux)
+	cookie := &http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
+	}
+	caps := func() string {
+		req := httptest.NewRequest("GET", "/api/capabilities", nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	if !strings.Contains(caps(), `"mustChangePassword":true`) {
+		t.Fatalf("초기 비밀번호인데 플래그 없음: %s", caps())
+	}
+	req := httptest.NewRequest("POST", "/api/account/password",
+		strings.NewReader(`{"currentPassword":"admin","newPassword":"newpass123"}`))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("password change: %d %s", rec.Code, rec.Body.String())
+	}
+	// 마운트 디렉터리는 아직 옛 해시지만(1분 지연 시뮬레이션) 플래그는 즉시 풀려야 한다
+	if strings.Contains(caps(), `"mustChangePassword":true`) {
+		t.Fatal("변경 직후에도 플래그가 남아 있음")
+	}
+}
+
+// Clusters list with ?status=true: local is connected, an unreachable remote
+// reports connected=false with an error.
+func TestClustersList_Status(t *testing.T) {
+	kubeconfig := "apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster: {server: \"https://127.0.0.1:1\"}\nusers:\n- name: u\n  user: {token: t}\ncontexts:\n- name: x\n  context: {cluster: c, user: u}\ncurrent-context: x\n"
+	kube := kubefake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "clusters", Namespace: "ns1"},
+		Data:       map[string][]byte{"prod": []byte(kubeconfig)},
+	})
+	mux := http.NewServeMux()
+	NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{Namespace: "ns1", Name: "clusters"}).Routes(mux)
+	req := httptest.NewRequest("GET", "/api/clusters?status=true", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "istio_dash_session",
+		Value: testSessions.Sign(auth.Identity{Name: "bob", Role: "viewer"}, time.Hour),
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	var out []struct {
+		Name      string
+		Connected *bool
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || out[0].Name != "local" || out[0].Connected == nil || !*out[0].Connected {
+		t.Fatalf("local status wrong: %s", rec.Body.String())
+	}
+	if out[1].Connected == nil || *out[1].Connected {
+		t.Fatalf("unreachable prod should be connected=false: %s", rec.Body.String())
+	}
+}

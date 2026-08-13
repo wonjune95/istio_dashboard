@@ -12,6 +12,7 @@ export interface Capabilities {
   devMode: boolean
   user?: string
   role?: string // admin | editor | viewer
+  mustChangePassword?: boolean // 초기 비밀번호(admin) 그대로 — 변경 전까지 화면 잠금
 }
 
 export function useCapabilities() {

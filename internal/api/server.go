@@ -35,6 +35,12 @@ type Server struct {
 
 	auditMu  sync.Mutex
 	auditLog []AuditEntry // newest first, capped at auditKeep
+
+	// 이번 부팅에서 비밀번호를 바꾼 사용자 — 마운트 CM 동기화(~1분)를 기다리지 않고
+	// 강제 변경 화면을 풀어준다. ponytail: 파드별 상태라 다중 복제본에선 다른 파드가
+	// 최대 1분 늦게 풀린다; replicaCount>1이 기본이 되면 세션에 실어야 한다.
+	pwChangedMu sync.Mutex
+	pwChanged   map[string]bool
 }
 
 func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *auth.Sessions, accountsCM AccountsCMRef, clustersSecret ClustersSecretRef) *Server {

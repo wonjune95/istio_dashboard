@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -68,20 +69,31 @@ func (s *Server) dropClusterCache(name string) {
 
 // handleClustersList returns "local" + registered clusters. 모든 로그인 사용자가
 // 호출한다(헤더 드롭다운). Secret 조회 실패는 local만 반환으로 degrade한다.
+// ?status=true면 각 클러스터에 병렬 ping해 연결 상태·버전을 채운다(설정 패널용).
 func (s *Server) handleClustersList(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.sessionIdentity(r); err != nil {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
 		return
 	}
 	type cluster struct {
-		Name string `json:"name"`
+		Name      string `json:"name"`
+		Connected *bool  `json:"connected,omitempty"`
+		Version   string `json:"version,omitempty"`
+		Error     string `json:"error,omitempty"`
 	}
+	withStatus := r.URL.Query().Get("status") == "true"
 	list := []cluster{{Name: "local"}}
+	if withStatus {
+		t := true // local은 이 응답을 서빙 중이라는 것 자체가 연결 증명
+		list[0].Connected = &t
+	}
+	var kubeconfigs map[string][]byte
 	if s.clustersSecret.Name != "" {
 		if client, err := s.factory.Base(); err == nil {
 			sec, err := client.Kube.CoreV1().Secrets(s.clustersSecret.Namespace).
 				Get(r.Context(), s.clustersSecret.Name, metav1.GetOptions{})
 			if err == nil {
+				kubeconfigs = sec.Data
 				names := make([]string, 0, len(sec.Data))
 				for name := range sec.Data {
 					names = append(names, name)
@@ -92,6 +104,28 @@ func (s *Server) handleClustersList(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+	if withStatus {
+		var wg sync.WaitGroup
+		for i := range list[1:] {
+			c := &list[i+1]
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				connected := false
+				c.Connected = &connected
+				f, err := k8s.NewClientFactoryFromKubeconfig(kubeconfigs[c.Name])
+				if err == nil {
+					c.Version, err = f.Ping()
+				}
+				if err != nil {
+					c.Error = err.Error()
+					return
+				}
+				connected = true
+			}()
+		}
+		wg.Wait()
 	}
 	writeJSON(w, http.StatusOK, list)
 }

@@ -1,6 +1,6 @@
 image:
-  repository: istio-dashboard
-  tag: dev
+  repository: ghcr.io/wonjune95/istio-dashboard
+  tag: ""              # 비우면 차트 appVersion을 쓴다
   pullPolicy: IfNotPresent
 
 # e.g. [{name: regcred}] for a private registry.

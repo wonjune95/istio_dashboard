@@ -1,5 +1,7 @@
 # Istio Routing Dashboard
 
+**한국어** | [English](README.en.md)
+
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-native-326CE5?logo=kubernetes&logoColor=white)
 ![Istio](https://img.shields.io/badge/Istio-%2FGateway%20API-466BB0?logo=istio&logoColor=white)
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
@@ -14,7 +16,7 @@
 
 ## 요약 (TL;DR)
 
-- **ArgoCD 방식 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 계정 `admin`/`admin`을 자동 생성한다** (첫 로그인 후 비밀번호 변경 권장).
+- **ArgoCD 방식 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 계정 `admin`/`admin`을 자동 생성**하고, 첫 로그인 시 **비밀번호 변경을 강제**한다.
 - **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다. 대시보드를 거친 모든 변경은 홈의 **변경 히스토리**에 계정명과 함께 기록된다.
 - **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 서버가 세션 저장소를 갖지 않아(서명 쿠키) N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
 - **제네릭 리소스 엔진** — 특정 CRD에 종속되지 않는 dynamic client 기반. Istio 12종 + Gateway API 7종을 하나의 CRUD 파이프라인으로 다룬다.
@@ -50,10 +52,10 @@ sequenceDiagram
 
 - **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 파드가 아니라 클러스터(etcd)에 저장되므로 **파드 재시작·재배포에도 계정은 유지**되고, 헬름이 이 CM을 관리하지 않아 upgrade에도 살아남는다. 변경은 마운트 동기화로 **재시작 없이 1분 내 반영**된다.
 - **계정 관리 UI** — admin은 설정 페이지에서 계정 추가·역할/비밀번호 변경·삭제를 할 수 있다(`GET/PUT/DELETE /api/accounts`, 서버가 CM을 patch). 잠금 방지를 위해 본인 삭제·본인 역할 변경은 차단. 물론 `kubectl edit`으로도 가능하다.
-- **초기 admin 자동 생성** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 첫 로그인 후 설정 페이지에서 반드시 비밀번호를 변경하자.
+- **초기 admin 자동 생성 + 변경 강제** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 초기 비밀번호 그대로 로그인하면 **비밀번호 변경 화면에 고정**되어 바꾸기 전까지 아무것도 할 수 없다.
 - **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
 - **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
-- **멀티클러스터** — 원격 클러스터 kubeconfig는 `istio-dashboard-clusters` Secret에 저장(키 = 클러스터명). 등록/삭제는 admin 전용 UI(`PUT/DELETE /api/clusters/{name}`, 등록 시 연결 테스트), 모든 API는 `?cluster=` 파라미터로 대상을 고른다(기본 `local`). CRD 카탈로그·스키마 캐시는 클러스터별로 분리되어 설치된 CRD가 달라도 안전하다.
+- **멀티클러스터** — 원격 클러스터 kubeconfig는 `istio-dashboard-clusters` Secret에 저장(키 = 클러스터명). 등록/삭제는 admin 전용 UI(`PUT/DELETE /api/clusters/{name}`, 등록 시 연결 테스트), 설정 페이지 목록에 각 클러스터의 **연결 상태·버전**이 표시된다. 모든 API는 `?cluster=` 파라미터로 대상을 고른다(기본 `local`). CRD 카탈로그·스키마 캐시는 클러스터별로 분리되어 설치된 CRD가 달라도 안전하다.
 - **세션은 서명 쿠키** — 서버 저장소가 없어 무상태 HA 그대로. `SESSION_SECRET` 미설정 시 부팅마다 랜덤 키(재시작 = 재로그인).
 - **하드닝** — CSP(`default-src 'self'`) 등 보안 헤더, HttpOnly 쿠키, distroless non-root, readOnlyRootFilesystem.
 - **에어갭** — 프론트 번들을 바이너리에 인라인. 런타임 외부 의존 0.
@@ -134,7 +136,7 @@ kubectl apply -f deploy/examples/httproute.yaml
 ```
 
 ### 4) 로그인
-첫 부팅 때 초기 계정 **`admin` / `admin`** 이 자동 생성된다. 로그인 후 설정 페이지(헤더의 사용자 칩)에서 반드시 비밀번호를 변경하자.
+첫 부팅 때 초기 계정 **`admin` / `admin`** 이 자동 생성된다. 로그인하면 비밀번호 변경 화면이 먼저 뜨고, 변경해야 대시보드에 들어갈 수 있다.
 
 ![로그인 화면](docs/screenshot-login.png)
 
@@ -234,27 +236,26 @@ ArgoCD와 같은 구조다 — 클러스터 권한과 사용자 권한을 분리
 
 | 층 | 담당 | 내용 |
 |---|---|---|
-| 클러스터 (K8s RBAC) | 파드 ServiceAccount | 관리 대상 CRD(`*.networking.istio.io`, `security/telemetry.istio.io`, `*.gateway.networking.k8s.io`) CRUD + namespaces/services 읽기 + 계정 CM patch. 헬름이 자동 구성. |
-| 사용자 (앱 역할) | 계정 ConfigMap | `admin` = 변경 + 계정 관리, `editor` = 변경 가능, `viewer` = 조회만. 서버가 모든 변경 요청을 역할로 게이트(403). |
+| 클러스터 (K8s RBAC) | 파드 ServiceAccount | 관리 대상 CRD(`*.networking.istio.io`, `security/telemetry.istio.io`, `*.gateway.networking.k8s.io`) CRUD + namespaces/services/endpoints 읽기 + 계정 CM·클러스터 Secret patch. 헬름이 자동 구성. |
+| 사용자 (앱 역할) | 계정 ConfigMap | `admin` = 변경 + 계정·클러스터 관리, `editor` = 변경 가능, `viewer` = 조회만. 서버가 모든 변경 요청을 역할로 게이트(403). |
 
 계정 관리는 admin이 설정 페이지의 **계정 관리 UI**에서 하거나(추가·역할/비밀번호 변경·삭제), `istio-dashboard-accounts` ConfigMap을 직접 편집해도 된다(키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제). 본인 비밀번호는 각자 설정 페이지에서 변경한다.
 
 ## 부록 — K8s 설치 한 번에 하기
 
-위 빠른 시작의 요약본. 프리빌트 이미지를 쓰면 클론 → 헬름 설치 → 접속까지 그대로 복붙하면 된다:
+위 빠른 시작의 요약본. 차트와 이미지가 모두 ghcr.io에 발행되므로 클론 없이 한 줄로 설치된다:
 
 ```bash
-git clone https://github.com/wonjune95/istio_dashboard.git && cd istio_dashboard
-
-# 설치 (네임스페이스는 원하는 곳으로)
-helm install istio-dashboard ./deploy/helm -n istio-system \
-  --set image.repository=ghcr.io/wonjune95/istio-dashboard \
-  --set image.tag=0.2.0
+# 설치 (네임스페이스는 원하는 곳으로; 이미지 기본값이 ghcr 프리빌트라 --set 불필요)
+helm install istio-dashboard oci://ghcr.io/wonjune95/charts/istio-dashboard \
+  --version 0.3.0 -n istio-system
 
 # 노출 전 바로 접속해보기
 kubectl -n istio-system port-forward svc/istio-dashboard-istio-dashboard 8080:8080
-# → http://localhost:8080  (초기 계정 admin / admin — 로그인 후 비밀번호 변경)
+# → http://localhost:8080  (초기 계정 admin / admin — 첫 로그인 때 비밀번호 변경이 강제된다)
 ```
+
+소스에서 설치하려면 `git clone` 후 `helm install istio-dashboard ./deploy/helm -n istio-system` (이미지 빌드는 빠른 시작 1단계 참고).
 
 정식 노출은 클러스터 환경에 맞게 하나를 고른다:
 

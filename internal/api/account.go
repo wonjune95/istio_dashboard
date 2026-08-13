@@ -111,8 +111,30 @@ func (s *Server) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Internal", "계정 ConfigMap 갱신 실패: "+err.Error())
 		return
 	}
+	s.markPasswordChanged(id.Name)
 	slog.Info("password changed", "user", id.Name)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// 초기 비밀번호("admin")를 아직 쓰는 계정이면 true — UI가 변경 화면에 고정한다.
+// 방금 바꾼 사용자는 마운트 동기화(~1분)를 기다리지 않도록 인메모리로 즉시 풀어준다.
+func (s *Server) mustChangePassword(user string) bool {
+	if s.dev || user == "" {
+		return false
+	}
+	s.pwChangedMu.Lock()
+	changed := s.pwChanged[user]
+	s.pwChangedMu.Unlock()
+	return !changed && s.accounts.PasswordIs(user, "admin")
+}
+
+func (s *Server) markPasswordChanged(user string) {
+	s.pwChangedMu.Lock()
+	if s.pwChanged == nil {
+		s.pwChanged = map[string]bool{}
+	}
+	s.pwChanged[user] = true
+	s.pwChangedMu.Unlock()
 }
 
 // patchAccount merge-patches one ConfigMap key; entry nil deletes the key.

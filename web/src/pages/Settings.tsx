@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useCapabilities } from '../api/capabilities'
-import { useClusters } from '../api/clusters'
+import { useClusters, type Cluster } from '../api/clusters'
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, getCluster, setCluster } from '../api/client'
 import { useToast } from '../components/Toast'
 
@@ -81,7 +81,7 @@ export function Settings() {
 // admin 전용 멀티클러스터 관리: kubeconfig 붙여넣기로 등록 (백엔드가 Secret에 저장).
 function ClustersPanel() {
   const toast = useToast()
-  const clusters = useClusters()
+  const clusters = useClusters(true)
   const [name, setName] = useState('')
   const [kubeconfig, setKubeconfig] = useState('')
   const [busy, setBusy] = useState(false)
@@ -129,14 +129,26 @@ function ClustersPanel() {
         <thead>
           <tr className="border-b border-gray-200 text-left text-xs text-muted dark:border-slate-700">
             <th className="py-1.5 font-medium">이름</th>
+            <th className="py-1.5 font-medium">상태</th>
             <th className="py-1.5" />
           </tr>
         </thead>
         <tbody>
-          {(clusters.data ?? [{ name: 'local' }]).map((c) => (
+          {(clusters.data ?? ([{ name: 'local' }] as Cluster[])).map((c) => (
             <tr key={c.name} className="border-b border-gray-100 last:border-0 dark:border-slate-800">
               <td className="py-1.5 text-strong">
                 {c.name}{c.name === 'local' && <span className="ml-1 text-xs text-muted">(이 클러스터)</span>}
+              </td>
+              <td className="py-1.5 text-xs">
+                {c.connected === undefined ? null : c.connected ? (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> 연결됨{c.version ? ` · ${c.version}` : ''}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-red-600 dark:text-red-400" title={c.error}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> 연결 실패
+                  </span>
+                )}
               </td>
               <td className="py-1.5 text-right">
                 <button

@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useCapabilities } from './api/capabilities'
-import { ApiError } from './api/client'
+import { ApiError, apiPost } from './api/client'
 import { Layout } from './components/Layout'
 import { Guard } from './pages/Guard'
 import { Login } from './pages/Login'
@@ -20,6 +20,9 @@ export function App() {
   // 401 → no session (or it expired) — show the local-account login.
   if (isError && error instanceof ApiError && error.status === 401) return <Login />
   if (isError) return <Centered>백엔드 연결 실패: {(error as Error).message}</Centered>
+
+  // 초기 비밀번호(admin/admin) 그대로면 변경 전까지 어디에도 못 들어간다.
+  if (data?.mustChangePassword) return <ForcePasswordChange />
 
   // No routing CRDs at all → install-guide screen.
   const noCRDs = data && !data.httpRouteInstalled && !data.virtualServiceInstalled
@@ -44,4 +47,57 @@ export function App() {
 
 function Centered({ children }: { children: ReactNode }) {
   return <div className="flex min-h-screen items-center justify-center text-muted">{children}</div>
+}
+
+// 초기 비밀번호 강제 변경 화면 — 성공하면 전체 리로드로 capabilities를 다시 받는다.
+function ForcePasswordChange() {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const canSubmit = current !== '' && next.length >= 8 && next === confirm && !busy
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!canSubmit) return
+    setBusy(true)
+    setError('')
+    try {
+      await apiPost('/api/account/password', { currentPassword: current, newPassword: next })
+      window.location.reload()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-slate-950">
+      <form onSubmit={submit} className="panel w-full max-w-sm space-y-3 rounded-xl p-6">
+        <h1 className="text-lg font-semibold text-strong">비밀번호를 변경하세요</h1>
+        <p className="text-sm text-muted">
+          초기 비밀번호(<code>admin</code>)를 그대로 쓰고 있습니다. 계속하려면 먼저 비밀번호를 변경해야 합니다.
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">현재 비밀번호</span>
+          <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" className="input-base w-full" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">새 비밀번호 (8자 이상)</span>
+          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" className="input-base w-full" />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">새 비밀번호 확인</span>
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" className="input-base w-full" />
+        </label>
+        {confirm !== '' && next !== confirm && <p className="text-sm text-red-600 dark:text-red-400">새 비밀번호가 일치하지 않습니다.</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <button type="submit" disabled={!canSubmit} className="btn-primary w-full disabled:opacity-50">
+          {busy ? '변경 중…' : '비밀번호 변경'}
+        </button>
+      </form>
+    </div>
+  )
 }

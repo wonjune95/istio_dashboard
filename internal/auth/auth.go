@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -39,9 +40,40 @@ func ValidRole(r string) bool { return validRoles[r] }
 
 // Store reads accounts from dir on every call — logins are rare and a mounted
 // ConfigMap updates in place, so no caching/watching is needed.
-type Store struct{ dir string }
+type Store struct {
+	dir string
 
-func NewStore(dir string) *Store { return &Store{dir: dir} }
+	pwMu    sync.Mutex
+	pwCache map[string]bool // "user:hash:plain" → 일치 여부 (capabilities의 초기 비밀번호 검사용)
+}
+
+func NewStore(dir string) *Store { return &Store{dir: dir, pwCache: map[string]bool{}} }
+
+// PasswordIs reports whether the account's current password equals plain.
+// 매 capabilities 호출마다 불리므로 해시별로 캐시한다(비밀번호가 바뀌면 해시가
+// 바뀌어 새 키가 된다 — 오래된 항목은 무해하고 사용자 수만큼만 쌓인다).
+func (s *Store) PasswordIs(username, plain string) bool {
+	if username == "" || strings.ContainsAny(username, "/\\") || strings.HasPrefix(username, ".") {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(s.dir, username))
+	if err != nil {
+		return false
+	}
+	_, hash, ok := strings.Cut(strings.TrimSpace(string(b)), ":")
+	if !ok {
+		return false
+	}
+	key := username + ":" + hash + ":" + plain
+	s.pwMu.Lock()
+	defer s.pwMu.Unlock()
+	if v, cached := s.pwCache[key]; cached {
+		return v
+	}
+	v := bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain)) == nil
+	s.pwCache[key] = v
+	return v
+}
 
 var ErrBadCredentials = errors.New("잘못된 계정 또는 비밀번호입니다")
 
