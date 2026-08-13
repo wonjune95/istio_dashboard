@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useFlowMap,
@@ -9,14 +9,14 @@ import {
 } from '../api/flowmap'
 import { Icon } from '../components/icons'
 
-type Edge = { from: string; to: string }
+type Edge = { from: string; to: string; broken?: boolean }
 
 // 노드 DOM 위치를 측정해 SVG 베지어 곡선으로 잇는 캔버스. setRef(id)로 노드를
 // 등록하고 edges의 from/to id를 연결한다.
 function useFlowCanvas(edges: Edge[]) {
   const containerRef = useRef<HTMLDivElement>(null)
   const nodeRefs = useRef(new Map<string, HTMLElement>())
-  const [paths, setPaths] = useState<{ key: string; d: string }[]>([])
+  const [paths, setPaths] = useState<{ key: string; d: string; broken?: boolean }[]>([])
 
   useLayoutEffect(() => {
     const draw = () => {
@@ -24,7 +24,7 @@ function useFlowCanvas(edges: Edge[]) {
       if (!c) return
       const cb = c.getBoundingClientRect()
       const seen = new Set<string>()
-      const out: { key: string; d: string }[] = []
+      const out: { key: string; d: string; broken?: boolean }[] = []
       for (const e of edges) {
         const key = `${e.from}→${e.to}`
         if (seen.has(key)) continue
@@ -37,7 +37,7 @@ function useFlowCanvas(edges: Edge[]) {
         const x2 = b.left - cb.left
         const y2 = b.top + b.height / 2 - cb.top
         const mx = (x1 + x2) / 2
-        out.push({ key, d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}` })
+        out.push({ key, broken: e.broken, d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}` })
       }
       setPaths(out)
     }
@@ -57,6 +57,7 @@ const gwId = (g: FlowGateway) => `${g.namespace}/${g.name}`
 const routeId = (r: FlowRoute) => `r:${r.kind}/${r.namespace}/${r.name}`
 const backendId = (b: FlowBackend) =>
   b.external ? `b:ext:${b.name}` : `b:${b.namespace}/${b.name}:${b.port ?? 0}`
+const backendBroken = (b: FlowBackend) => !b.external && (!b.exists || b.endpoints === 0)
 
 export function FlowMap() {
   const { data, isLoading } = useFlowMap()
@@ -76,7 +77,7 @@ export function FlowMap() {
         for (const g of r.gateways) if (ids.has(g)) edges.push({ from: `g:${g}`, to: routeId(r) })
         for (const b of r.backends) {
           if (!backends.has(backendId(b))) backends.set(backendId(b), b)
-          edges.push({ from: routeId(r), to: backendId(b) })
+          edges.push({ from: routeId(r), to: backendId(b), broken: backendBroken(b) })
         }
       }
       return { gws, rts, backends, edges }
@@ -97,7 +98,7 @@ export function FlowMap() {
   const hasEgress = egress.gws.length > 0 || egress.directSEs.length > 0 || egress.rts.length > 0
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold text-strong">트래픽 흐름</h2>
         <p className="mt-1 text-sm text-muted">
@@ -139,6 +140,51 @@ export function FlowMap() {
   )
 }
 
+// 아이콘 칩 + 제목/메타/배지로 이루어진 노드 카드 공통 틀
+function NodeCard({
+  icon, iconClass, title, meta, badge, to, nodeRef,
+}: {
+  icon: string
+  iconClass: string
+  title: ReactNode
+  meta: ReactNode
+  badge?: ReactNode
+  to?: string
+  nodeRef: (el: HTMLElement | null) => void
+}) {
+  const body = (
+    <div className="flex items-start gap-2.5">
+      <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
+        <Icon name={icon} className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-strong">{title}</div>
+        <div className="mt-0.5 truncate text-xs text-muted">{meta}</div>
+        {badge && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{badge}</div>}
+      </div>
+    </div>
+  )
+  return to ? (
+    <Link ref={nodeRef as never} to={to} className="flow-node w-64">{body}</Link>
+  ) : (
+    <div ref={nodeRef} className="flow-node w-64">{body}</div>
+  )
+}
+
+function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'muted' | 'accent'; children: ReactNode }) {
+  const cls = {
+    ok: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    warn: 'bg-red-500/10 text-red-600 dark:text-red-400',
+    muted: 'bg-gray-500/10 text-gray-500 dark:text-slate-400',
+    accent: 'bg-accent-soft text-accent',
+  }[tone]
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}>{children}</span>
+}
+
+function Dot({ tone }: { tone: 'ok' | 'warn' }) {
+  return <span className={`h-1.5 w-1.5 rounded-full ${tone === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+}
+
 function FlowSection({
   title, srcLabel, srcIcon, gateways, routes, backends, serviceEntries, edges,
 }: {
@@ -154,109 +200,100 @@ function FlowSection({
   const { containerRef, setRef, paths } = useFlowCanvas(edges)
 
   return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">{title}</h3>
+    <div className="flow-canvas">
+      <h3 className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-faint">{title}</h3>
       <div ref={containerRef} className="relative">
         <svg className="pointer-events-none absolute inset-0 h-full w-full">
           {paths.map((p) => (
-            <path key={p.key} d={p.d} fill="none" className="stroke-gray-300 dark:stroke-slate-700" strokeWidth="1.5" />
+            <path
+              key={p.key}
+              d={p.d}
+              fill="none"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              className={`flow-edge ${p.broken ? 'stroke-red-400/70' : 'stroke-gray-400/50 dark:stroke-slate-500/60'}`}
+            />
           ))}
         </svg>
-        <div className="relative flex items-start gap-14">
+        <div className="relative flex items-start gap-16">
           <div className="flex w-24 shrink-0 flex-col items-center self-center" ref={setRef('src')}>
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-white">
+            <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg" style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}>
               <Icon name={srcIcon} className="h-6 w-6" />
             </span>
-            <span className="mt-1.5 text-xs font-medium text-muted">{srcLabel}</span>
+            <span className="mt-2 text-xs font-medium text-muted">{srcLabel}</span>
           </div>
 
           {gateways.length > 0 && (
-            <div className="flex min-w-0 flex-col gap-4">
+            <div className="flex min-w-0 flex-col gap-5">
               {gateways.map((g) => (
-                <Link
+                <NodeCard
                   key={gwId(g)}
-                  ref={setRef(`g:${gwId(g)}`)}
+                  nodeRef={setRef(`g:${gwId(g)}`)}
                   to={`/resources/${g.typeId}/${g.namespace}/${g.name}`}
-                  className="panel block w-56 rounded-xl border-l-4 !border-l-blue-500 p-3 hover:shadow-sm"
-                >
-                  <div className="truncate text-sm font-medium text-strong">{g.name}</div>
-                  <div className="mt-0.5 text-xs text-muted">
-                    {g.kind === 'IstioGateway' ? 'Istio Gateway' : 'Gateway API'} · {g.namespace}
-                  </div>
-                  {g.hosts.length > 0 && <div className="mt-1 truncate text-xs text-accent">{g.hosts.join(', ')}</div>}
-                </Link>
+                  icon="shield"
+                  iconClass="bg-blue-500/10 text-blue-500"
+                  title={g.name}
+                  meta={`${g.kind === 'IstioGateway' ? 'Istio Gateway' : 'Gateway API'} · ${g.namespace}`}
+                  badge={g.hosts.length > 0 && <Pill tone="accent">{g.hosts.join(', ')}</Pill>}
+                />
               ))}
             </div>
           )}
 
           {routes.length > 0 && (
-            <div className="flex min-w-0 flex-col gap-4">
+            <div className="flex min-w-0 flex-col gap-5">
               {routes.map((r) => (
-                <Link
+                <NodeCard
                   key={routeId(r)}
-                  ref={setRef(routeId(r))}
+                  nodeRef={setRef(routeId(r))}
                   to={`/resources/${r.typeId}/${r.namespace}/${r.name}`}
-                  className="panel block w-64 rounded-xl p-3 hover:shadow-sm"
-                >
-                  <div className="truncate text-sm font-medium text-strong">
-                    {r.hosts.length > 0 ? r.hosts.join(', ') : r.name}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted">
-                    {r.kind} · {r.namespace}/{r.name}
-                  </div>
-                </Link>
+                  icon="bolt"
+                  iconClass="bg-violet-500/10 text-violet-500"
+                  title={r.hosts.length > 0 ? r.hosts.join(', ') : r.name}
+                  meta={`${r.kind} · ${r.namespace}/${r.name}`}
+                />
               ))}
             </div>
           )}
 
-          <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-5">
             {[...backends.entries()].map(([id, b]) => (
-              <div
+              <NodeCard
                 key={id}
-                ref={setRef(id)}
-                className={`panel w-60 rounded-xl border-l-4 p-3 ${
+                nodeRef={setRef(id)}
+                icon="cube"
+                iconClass={
                   b.external
-                    ? '!border-l-gray-400'
-                    : b.exists && b.endpoints > 0
-                      ? '!border-l-orange-400'
-                      : '!border-l-red-400'
-                }`}
-              >
-                <div className="truncate text-sm font-medium text-strong">
-                  {b.name}
-                  {b.port ? <span className="text-muted">:{b.port}</span> : null}
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                  {b.external ? (
-                    b.serviceEntry ? (
-                      <>외부 · ServiceEntry <span className="text-accent">{b.serviceEntry}</span></>
-                    ) : (
-                      '외부 호스트'
-                    )
-                  ) : b.exists ? (
-                    <>
-                      {b.namespace} · 엔드포인트 {b.endpoints}
-                      {b.endpoints === 0 && <Icon name="warning" className="h-3.5 w-3.5 text-red-500" />}
-                    </>
+                    ? 'bg-gray-500/10 text-gray-500 dark:text-slate-400'
+                    : backendBroken(b)
+                      ? 'bg-red-500/10 text-red-500'
+                      : 'bg-emerald-500/10 text-emerald-500'
+                }
+                title={<>{b.name}{b.port ? <span className="font-normal text-muted">:{b.port}</span> : null}</>}
+                meta={b.external ? '외부 호스트' : `Service · ${b.namespace}`}
+                badge={
+                  b.external ? (
+                    b.serviceEntry && <Pill tone="accent">ServiceEntry {b.serviceEntry}</Pill>
+                  ) : !b.exists ? (
+                    <Pill tone="warn"><Dot tone="warn" /> 서비스 없음</Pill>
+                  ) : b.endpoints === 0 ? (
+                    <Pill tone="warn"><Dot tone="warn" /> 엔드포인트 0</Pill>
                   ) : (
-                    <>
-                      {b.namespace} · <span className="text-red-500">서비스 없음</span>
-                      <Icon name="warning" className="h-3.5 w-3.5 text-red-500" />
-                    </>
-                  )}
-                </div>
-              </div>
+                    <Pill tone="ok"><Dot tone="ok" /> 엔드포인트 {b.endpoints}</Pill>
+                  )
+                }
+              />
             ))}
             {serviceEntries.map((se) => (
-              <Link
+              <NodeCard
                 key={`${se.namespace}/${se.name}`}
-                ref={setRef(`se:${se.namespace}/${se.name}`)}
+                nodeRef={setRef(`se:${se.namespace}/${se.name}`)}
                 to={`/resources/${se.typeId}/${se.namespace}/${se.name}`}
-                className="panel block w-60 rounded-xl border-l-4 !border-l-emerald-500 p-3 hover:shadow-sm"
-              >
-                <div className="truncate text-sm font-medium text-strong">{se.hosts.join(', ') || se.name}</div>
-                <div className="mt-0.5 text-xs text-muted">ServiceEntry · {se.namespace}/{se.name}</div>
-              </Link>
+                icon="chart"
+                iconClass="bg-emerald-500/10 text-emerald-500"
+                title={se.hosts.join(', ') || se.name}
+                meta={`ServiceEntry · ${se.namespace}/${se.name}`}
+              />
             ))}
           </div>
         </div>
