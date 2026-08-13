@@ -568,6 +568,27 @@ func TestFlowMap(t *testing.T) {
 			Spec: istioapi.Gateway{Servers: []*istioapi.Server{{Hosts: []string{"shop.example.com"}}}}}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	// 이그레스: egressgateway 셀렉터 게이트웨이 + 외부 목적지 VS + 커버하는 SE
+	if _, err := istio.NetworkingV1().Gateways("istio-system").Create(context.Background(),
+		&istionet.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "egressgw", Namespace: "istio-system"},
+			Spec: istioapi.Gateway{Selector: map[string]string{"istio": "egressgateway"}}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := istio.NetworkingV1().VirtualServices("dev").Create(context.Background(),
+		&istionet.VirtualService{ObjectMeta: metav1.ObjectMeta{Name: "to-ext", Namespace: "dev"},
+			Spec: istioapi.VirtualService{
+				Hosts:    []string{"api.example.com"},
+				Gateways: []string{"istio-system/egressgw"},
+				Http: []*istioapi.HTTPRoute{{Route: []*istioapi.HTTPRouteDestination{
+					{Destination: &istioapi.Destination{Host: "api.example.com"}}}}},
+			}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := istio.NetworkingV1().ServiceEntries("dev").Create(context.Background(),
+		&istionet.ServiceEntry{ObjectMeta: metav1.ObjectMeta{Name: "ext-se", Namespace: "dev"},
+			Spec: istioapi.ServiceEntry{Hosts: []string{"*.example.com"}}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	gw := gwfake.NewSimpleClientset(
 		&gwapi.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "hr", Namespace: "dev"},
 			Spec: gwapi.HTTPRouteSpec{
@@ -584,24 +605,38 @@ func TestFlowMap(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	var out struct {
-		Gateways []struct{ Name string }
-		Routes   []struct {
+		Gateways []struct {
+			Name   string
+			Egress bool
+		}
+		Routes []struct {
 			Name     string
 			Gateways []string
 			Backends []struct {
-				Name      string
-				Exists    bool
-				Endpoints int
+				Name         string
+				Exists       bool
+				Endpoints    int
+				External     bool
+				ServiceEntry string
 			}
 		}
+		ServiceEntries []struct{ Name string }
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Gateways) != 1 || out.Gateways[0].Name != "ingressgw" {
+	if len(out.Gateways) != 2 {
 		t.Fatalf("gateways = %+v", out.Gateways)
 	}
-	if len(out.Routes) != 2 {
+	for _, g := range out.Gateways {
+		if wantEgress := g.Name == "egressgw"; g.Egress != wantEgress {
+			t.Fatalf("gateway %s egress = %v", g.Name, g.Egress)
+		}
+	}
+	if len(out.ServiceEntries) != 1 || out.ServiceEntries[0].Name != "ext-se" {
+		t.Fatalf("serviceEntries = %+v", out.ServiceEntries)
+	}
+	if len(out.Routes) != 3 {
 		t.Fatalf("mesh-only VS should be excluded, routes = %+v", out.Routes)
 	}
 	for _, rt := range out.Routes {
@@ -620,6 +655,11 @@ func TestFlowMap(t *testing.T) {
 			}
 			if rt.Gateways[0] != "dev/tgw" {
 				t.Fatalf("hr gateways = %v", rt.Gateways)
+			}
+		case "to-ext":
+			b := rt.Backends[0]
+			if !b.External || b.ServiceEntry != "ext-se" {
+				t.Fatalf("to-ext backend = %+v (와일드카드 SE 매치 실패)", b)
 			}
 		}
 	}

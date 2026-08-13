@@ -8,6 +8,7 @@ export type FlowBackend = {
   external?: boolean
   exists: boolean
   endpoints: number
+  serviceEntry?: string
 }
 export type FlowRoute = {
   kind: 'VirtualService' | 'HTTPRoute'
@@ -24,8 +25,15 @@ export type FlowGateway = {
   namespace: string
   name: string
   hosts: string[]
+  egress?: boolean
 }
-export type FlowMap = { gateways: FlowGateway[]; routes: FlowRoute[] }
+export type FlowServiceEntry = {
+  typeId: string
+  namespace: string
+  name: string
+  hosts: string[]
+}
+export type FlowMap = { gateways: FlowGateway[]; routes: FlowRoute[]; serviceEntries: FlowServiceEntry[] }
 
 export function useFlowMap() {
   return useQuery({

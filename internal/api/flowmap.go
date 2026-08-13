@@ -16,12 +16,13 @@ import (
 // 메트릭 없이 라우팅 리소스만으로 "이 호스트로 들어온 트래픽이 어디로 가나"를 그린다.
 
 type flowBackend struct {
-	Namespace string `json:"namespace,omitempty"`
-	Name      string `json:"name"`
-	Port      int32  `json:"port,omitempty"`
-	External  bool   `json:"external,omitempty"` // 클러스터 서비스로 안 풀리는 호스트
-	Exists    bool   `json:"exists"`
-	Endpoints int    `json:"endpoints"` // ready 엔드포인트(대략 파드) 수
+	Namespace    string `json:"namespace,omitempty"`
+	Name         string `json:"name"`
+	Port         int32  `json:"port,omitempty"`
+	External     bool   `json:"external,omitempty"` // 클러스터 서비스로 안 풀리는 호스트
+	Exists       bool   `json:"exists"`
+	Endpoints    int    `json:"endpoints"`              // ready 엔드포인트(대략 파드) 수
+	ServiceEntry string `json:"serviceEntry,omitempty"` // 외부 호스트를 커버하는 SE 이름
 }
 
 type flowRoute struct {
@@ -40,11 +41,20 @@ type flowGateway struct {
 	Namespace string   `json:"namespace"`
 	Name      string   `json:"name"`
 	Hosts     []string `json:"hosts"`
+	Egress    bool     `json:"egress,omitempty"` // 이그레스 게이트웨이 (selector istio=egressgateway 휴리스틱)
+}
+
+type flowServiceEntry struct {
+	TypeID    string   `json:"typeId"`
+	Namespace string   `json:"namespace"`
+	Name      string   `json:"name"`
+	Hosts     []string `json:"hosts"`
 }
 
 type flowMap struct {
-	Gateways []flowGateway `json:"gateways"`
-	Routes   []flowRoute   `json:"routes"`
+	Gateways       []flowGateway      `json:"gateways"`
+	Routes         []flowRoute        `json:"routes"`
+	ServiceEntries []flowServiceEntry `json:"serviceEntries"`
 }
 
 // handleFlowMap builds the graph from live resources. CRD가 없는 소스는 조용히
@@ -52,7 +62,7 @@ type flowMap struct {
 func (s *Server) handleFlowMap(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	c := clientFrom(ctx)
-	out := flowMap{Gateways: []flowGateway{}, Routes: []flowRoute{}}
+	out := flowMap{Gateways: []flowGateway{}, Routes: []flowRoute{}, ServiceEntries: []flowServiceEntry{}}
 
 	// 게이트웨이 (Gateway API + Istio)
 	if gws, err := c.Gateway.GatewayV1().Gateways("").List(ctx, metav1.ListOptions{}); err == nil {
@@ -87,6 +97,18 @@ func (s *Server) handleFlowMap(w http.ResponseWriter, r *http.Request) {
 			out.Gateways = append(out.Gateways, flowGateway{
 				Kind: "IstioGateway", TypeID: "gateways.networking.istio.io",
 				Namespace: g.Namespace, Name: g.Name, Hosts: dedupe(hosts),
+				Egress: g.Spec.Selector["istio"] == "egressgateway" || strings.Contains(g.Name, "egress"),
+			})
+		}
+	}
+
+	// ServiceEntry — 메시에서 나가는 외부 목적지 등록부 (이그레스 흐름)
+	if ses, err := c.Istio.NetworkingV1().ServiceEntries("").List(ctx, metav1.ListOptions{}); err == nil {
+		for _, se := range ses.Items {
+			out.ServiceEntries = append(out.ServiceEntries, flowServiceEntry{
+				TypeID:    "serviceentries.networking.istio.io",
+				Namespace: se.Namespace, Name: se.Name,
+				Hosts: append([]string{}, se.Spec.Hosts...),
 			})
 		}
 	}
@@ -196,6 +218,7 @@ func (s *Server) handleFlowMap(w http.ResponseWriter, r *http.Request) {
 		for j := range out.Routes[i].Backends {
 			b := &out.Routes[i].Backends[j]
 			if b.External {
+				b.ServiceEntry = serviceEntryFor(out.ServiceEntries, b.Name)
 				continue
 			}
 			key := b.Namespace + "/" + b.Name
@@ -218,7 +241,26 @@ func (s *Server) handleFlowMap(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(out.Routes, func(i, j int) bool {
 		return out.Routes[i].Namespace+out.Routes[i].Name < out.Routes[j].Namespace+out.Routes[j].Name
 	})
+	sort.Slice(out.ServiceEntries, func(i, j int) bool {
+		return out.ServiceEntries[i].Namespace+out.ServiceEntries[i].Name < out.ServiceEntries[j].Namespace+out.ServiceEntries[j].Name
+	})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// serviceEntryFor returns the SE covering an external host (정확히 일치 또는
+// "*.suffix" 와일드카드 매치).
+func serviceEntryFor(ses []flowServiceEntry, host string) string {
+	for _, se := range ses {
+		for _, h := range se.Hosts {
+			if h == host {
+				return se.Name
+			}
+			if suffix, ok := strings.CutPrefix(h, "*"); ok && strings.HasSuffix(host, suffix) {
+				return se.Name
+			}
+		}
+	}
+	return ""
 }
 
 // resolveDestination maps a VS destination host to a service or external host.
