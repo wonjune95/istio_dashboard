@@ -239,6 +239,34 @@ ArgoCD와 같은 구조다 — 클러스터 권한과 사용자 권한을 분리
 
 계정 관리는 admin이 설정 페이지의 **계정 관리 UI**에서 하거나(추가·역할/비밀번호 변경·삭제), `istio-dashboard-accounts` ConfigMap을 직접 편집해도 된다(키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제). 본인 비밀번호는 각자 설정 페이지에서 변경한다.
 
+## 부록 — K8s 설치 한 번에 하기
+
+위 빠른 시작의 요약본. 프리빌트 이미지를 쓰면 클론 → 헬름 설치 → 접속까지 그대로 복붙하면 된다:
+
+```bash
+git clone https://github.com/wonjune95/istio_dashboard.git && cd istio_dashboard
+
+# 설치 (네임스페이스는 원하는 곳으로)
+helm install istio-dashboard ./deploy/helm -n istio-system \
+  --set image.repository=ghcr.io/wonjune95/istio-dashboard \
+  --set image.tag=0.2.0
+
+# 노출 전 바로 접속해보기
+kubectl -n istio-system port-forward svc/istio-dashboard-istio-dashboard 8080:8080
+# → http://localhost:8080  (초기 계정 admin / admin — 로그인 후 비밀번호 변경)
+```
+
+정식 노출은 클러스터 환경에 맞게 하나를 고른다:
+
+```bash
+# Gateway API가 있으면 — parentRefs·hostname 수정 후
+kubectl apply -f deploy/examples/httproute.yaml
+
+# Ingress 컨트롤러만 있으면 — 백엔드 서비스 istio-dashboard-istio-dashboard:8080 으로 Ingress 생성
+```
+
+설치 후 할 일: ① admin 비밀번호 변경(설정 페이지) ② 계정 추가(설정 → 계정 관리) ③ 멀티클러스터가 필요하면 설정 → 클러스터 관리에서 kubeconfig 등록. 제거는 `helm uninstall istio-dashboard -n istio-system` (계정 ConfigMap과 클러스터 Secret은 남으므로 완전 삭제 시 함께 지운다).
+
 ## 라이선스
 
 [MIT](LICENSE)
