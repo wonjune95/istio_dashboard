@@ -1,6 +1,6 @@
 // Package k8s builds Kubernetes clients for the dashboard.
 //
-// Auth model (ArgoCD-style): users log in with local accounts (internal/auth) and
+// Auth model: users log in with app-local accounts (internal/auth) and
 // the app's role decides what they may do. Every Kubernetes call runs as one
 // identity — the pod's ServiceAccount in prod, the local kubeconfig in dev.
 package k8s

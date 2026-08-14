@@ -66,7 +66,7 @@ func (s *Server) canListNamespaces(ctx context.Context) (bool, error) {
 	return res.Status.Allowed, nil
 }
 
-// handleAccess answers verb permissions from the session's app role (ArgoCD-style):
+// handleAccess answers verb permissions from the session's app role:
 // reads for everyone, writes for editor/admin. Kept as an endpoint so the UI's
 // read-only affordances (disabled buttons, banners) work unchanged.
 func (s *Server) handleAccess(w http.ResponseWriter, r *http.Request) {

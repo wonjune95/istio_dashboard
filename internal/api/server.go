@@ -98,7 +98,7 @@ func (s *Server) sessionIdentity(r *http.Request) (auth.Identity, error) {
 	return s.sessions.Parse(c.Value)
 }
 
-// withAuth authenticates the session cookie (ArgoCD-style app auth), enforces
+// withAuth authenticates the session cookie (app-local auth), enforces
 // the role on mutating methods, and injects the shared SA-backed client plus the
 // user's identity into the context. Dev mode skips the session entirely.
 func (s *Server) withAuth(next http.Handler) http.Handler {

@@ -36,7 +36,7 @@ spec:
             - name: http
               containerPort: 8080
           env:
-            # ArgoCD 방식 로컬 계정: ConfigMap(accountsConfigMap)을 디렉터리로 마운트.
+            # 앱 자체 로컬 계정: ConfigMap(accountsConfigMap)을 디렉터리로 마운트.
             # 한 키 = 한 사용자, 값 = "role:bcryptHash". CM 수정만으로 계정 추가/삭제.
             - name: ACCOUNTS_DIR
               value: /etc/periplus/accounts

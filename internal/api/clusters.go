@@ -19,7 +19,7 @@ import (
 
 // ClustersSecretRef locates the Secret holding remote-cluster kubeconfigs
 // (key = 클러스터 이름, value = kubeconfig 원문). 빈 Name이면 멀티클러스터 비활성
-// — "local"만 존재한다. ArgoCD처럼 자격증명은 로컬 클러스터 Secret에만 저장한다.
+// — "local"만 존재한다. 자격증명은 대시보드가 있는 클러스터의 Secret에만 저장한다.
 type ClustersSecretRef struct{ Namespace, Name string }
 
 // clusterSource resolves the ?cluster= parameter to a per-cluster factory.

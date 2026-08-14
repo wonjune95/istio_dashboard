@@ -41,7 +41,7 @@ func main() {
 		slog.Error("kube client init failed", "err", err)
 		os.Exit(1)
 	}
-	// ArgoCD-style local accounts: a mounted ConfigMap dir (one file per user,
+	// App-local accounts: a mounted ConfigMap dir (one file per user,
 	// "role:bcryptHash"). Sessions are HMAC cookies; empty SESSION_SECRET means a
 	// per-boot random key (restart = re-login).
 	accountsDir := os.Getenv("ACCOUNTS_DIR")

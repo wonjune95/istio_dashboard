@@ -4,7 +4,7 @@ import { useClusters, type Cluster } from '../api/clusters'
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, getCluster, setCluster } from '../api/client'
 import { useToast } from '../components/Toast'
 
-// ArgoCD의 User Info처럼 내 계정 정보 + 비밀번호 변경.
+// 내 계정 정보 + 비밀번호 변경.
 export function Settings() {
   const caps = useCapabilities()
   const toast = useToast()
@@ -123,7 +123,7 @@ function ClustersPanel() {
     <div className="panel space-y-3 rounded-xl p-5">
       <h3 className="text-sm font-semibold text-strong">클러스터 관리</h3>
       <p className="text-xs text-muted">
-        kubeconfig를 붙여넣으면 원격 클러스터가 등록됩니다 (ArgoCD처럼 자격증명은 로컬 클러스터 Secret에 저장).
+        kubeconfig를 붙여넣으면 원격 클러스터가 등록됩니다 (자격증명은 이 클러스터의 Secret에만 저장).
       </p>
       <table className="w-full text-sm">
         <thead>

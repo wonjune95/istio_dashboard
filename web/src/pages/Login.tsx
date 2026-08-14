@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ApiError, apiPost } from '../api/client'
 
-// ArgoCD 방식 로컬 계정 로그인. 계정은 periplus-accounts ConfigMap에서
+// 앱 자체 로컬 계정 로그인. 계정은 periplus-accounts ConfigMap에서
 // 관리한다 (한 키 = 한 사용자, 값 = "role:bcryptHash"). 세션은 HttpOnly 쿠키.
 export function Login() {
   const [username, setUsername] = useState('')

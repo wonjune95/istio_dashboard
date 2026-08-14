@@ -19,11 +19,11 @@
 
 ## 요약 (TL;DR)
 
-- **ArgoCD 방식 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 계정 `admin`/`admin`을 자동 생성**하고, 첫 로그인 시 **비밀번호 변경을 강제**한다.
+- **자체 계정 · 역할 인증** — 계정은 ConfigMap 하나로 관리(사용자 = `역할:bcrypt해시`), 로그인하면 HMAC 서명 세션 쿠키. 클러스터 작업은 파드 ServiceAccount **단일 신원**으로 수행하고, 누가 무엇을 할 수 있는지는 앱 역할(`admin`/`editor`/`viewer`)이 결정한다. 설치 시 admin 계정이 없으면 **초기 계정 `admin`/`admin`을 자동 생성**하고, 첫 로그인 시 **비밀번호 변경을 강제**한다.
 - **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다. 대시보드를 거친 모든 변경은 홈의 **변경 히스토리**에 계정명과 함께 기록된다.
 - **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 서버가 세션 저장소를 갖지 않아(서명 쿠키) N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
 - **제네릭 리소스 엔진** — 특정 CRD에 종속되지 않는 dynamic client 기반. Istio 12종 + Gateway API 7종을 하나의 CRUD 파이프라인으로 다룬다.
-- **멀티클러스터** — ArgoCD처럼 kubeconfig를 붙여넣어 원격 클러스터를 등록하고(설정 페이지, admin), 헤더 드롭다운으로 전환한다. 자격증명은 로컬 클러스터 Secret에만 저장되고, 대상 클러스터에는 아무것도 설치하지 않는다.
+- **멀티클러스터** — kubeconfig를 붙여넣는 것만으로 원격 클러스터를 등록하고(설정 페이지, admin), 헤더 드롭다운으로 전환한다. 자격증명은 대시보드가 있는 클러스터의 Secret에만 저장되고, 대상 클러스터에는 아무것도 설치하지 않는다.
 
 ---
 
@@ -181,8 +181,8 @@ kubectl -n istio-system edit configmap periplus-accounts
 ### 왜 kind 전용 구조 대신 제네릭 엔진인가
 초기 설계는 `HTTPRoute`/`VirtualService` 두 kind에 전용 provider를 두는 방식이었다. 하지만 Istio·Gateway API는 kind가 20종에 달하고 CRD 버전이 계속 바뀐다. 전용 모델을 kind마다 만들면 관리 비용이 선형으로 늘고 CRD 버전 변화에 취약하다. → **dynamic client + CRD OpenAPI 스키마 자동 폼**으로 전환해, kind 추가가 레지스트리 한 줄로 끝나고 스키마 변화에 자동 적응하도록 했다. 대신 kind별 curated 폼이 필요한 소수(예: VirtualService)는 선택적으로 얹을 수 있게 남겨뒀다.
 
-### 왜 토큰 패스스루에서 ArgoCD 방식으로 바꿨나
-초기 구현은 사용자의 K8s Bearer 토큰을 그대로 패스스루해 클러스터 RBAC로 인가했다 — 권한 모델은 정확했지만, 사용자마다 토큰을 발급·전달·갱신해야 하는 운영 부담이 컸고 로그인 UX도 나빴다. → ArgoCD처럼 **앱 자체 계정(ConfigMap) + 역할**로 전환하고 클러스터 작업은 SA 단일 신원으로 통일했다. K8s 감사 로그에 사용자 대신 SA가 찍히는 단점은 대시보드 자체의 변경 히스토리(계정명 기록)로 상쇄한다. 사용자별 K8s RBAC 일치가 꼭 필요해지면 Impersonation 방식으로 확장할 수 있다.
+### 왜 토큰 패스스루에서 앱 자체 계정으로 바꿨나
+초기 구현은 사용자의 K8s Bearer 토큰을 그대로 패스스루해 클러스터 RBAC로 인가했다 — 권한 모델은 정확했지만, 사용자마다 토큰을 발급·전달·갱신해야 하는 운영 부담이 컸고 로그인 UX도 나빴다. → **앱 자체 계정(ConfigMap) + 역할**로 전환하고 클러스터 작업은 SA 단일 신원으로 통일했다. K8s 감사 로그에 사용자 대신 SA가 찍히는 단점은 대시보드 자체의 변경 히스토리(계정명 기록)로 상쇄한다. 사용자별 K8s RBAC 일치가 꼭 필요해지면 Impersonation 방식으로 확장할 수 있다.
 
 ### 왜 실시간 SSE 스트림을 넣지 않았나
 설계 단계에선 사용자별 watch → SSE 실시간 동기화를 계획했다. 그러나 **무상태 HA를 지키려면** 연결마다 watch를 열어야 하고, 이는 복제본 수 × 동접 수만큼 API 서버 watch 연결을 만든다. 사내 운영 도구(동접 수십, 변경 저빈도)라는 실제 사용 맥락에서 이 비용은 정당화되지 않았다. → 서버 무상태성을 그대로 지키는 쪽을 택하고, **서버 인메모리 변경 히스토리**(30초 주기 갱신)와 수동 새로고침으로 수렴시켰다. *"있으면 좋은 실시간"보다 "깨지지 않는 무상태 HA"를 우선한 의도적 타협.*
@@ -199,7 +199,7 @@ periplus/
 ├─ cmd/server/main.go          # 엔트리포인트: ServeMux, 프로브/metrics, graceful shutdown
 ├─ internal/
 │  ├─ api/                     # JSON 핸들러 (resources CRUD, login/계정, capabilities, 변경 히스토리)
-│  ├─ auth/                    # 로컬 계정(bcrypt) + HMAC 세션 (ArgoCD 방식)
+│  ├─ auth/                    # 로컬 계정(bcrypt) + HMAC 세션
 │  ├─ k8s/                     # dynamic client 팩토리, kind 레지스트리, discovery, 참조 조회
 │  ├─ assets/                  # 빌드된 React(dist) embed + SPA fallback
 │  └─ observability/           # slog 로깅, Prometheus metrics
@@ -235,7 +235,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 
 ## 권한 모델
 
-ArgoCD와 같은 구조다 — 클러스터 권한과 사용자 권한을 분리한다:
+권한을 두 층으로 나눈다 — 클러스터 권한과 사용자 권한은 별개다:
 
 | 층 | 담당 | 내용 |
 |---|---|---|

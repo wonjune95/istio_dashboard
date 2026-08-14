@@ -19,11 +19,11 @@
 
 ## TL;DR
 
-- **ArgoCD-style auth** — accounts live in one ConfigMap (`user = "role:bcryptHash"`); login issues an HMAC-signed session cookie. All cluster operations run as a **single identity** (the pod's ServiceAccount) while app roles (`admin`/`editor`/`viewer`) decide who can do what. On install, if no admin account exists, an initial **`admin`/`admin`** account is created — and the first login **forces a password change**.
+- **App-local accounts + roles** — accounts live in one ConfigMap (`user = "role:bcryptHash"`); login issues an HMAC-signed session cookie. All cluster operations run as a **single identity** (the pod's ServiceAccount) while app roles (`admin`/`editor`/`viewer`) decide who can do what. On install, if no admin account exists, an initial **`admin`/`admin`** account is created — and the first login **forces a password change**.
 - **Write safety first** — every write goes through `dry-run` validation → a `kubectl diff`-style preview → apply. Optimistic locking via `resourceVersion` detects 409 conflicts and shows *your edit vs the server's latest*; high-risk kinds require typing the resource name to confirm. Every change made through the dashboard is recorded in the home page's **change history** with the account name.
 - **Stateless HA · air-gapped** — a single Go binary embedding the React SPA via `embed.FS`. No server-side session store (signed cookies), so it scales horizontally, and zero CDN dependencies means it runs in closed networks out of the box.
 - **Generic resource engine** — built on the dynamic client, not tied to specific CRDs. 12 Istio kinds + 7 Gateway API kinds through one CRUD pipeline.
-- **Multi-cluster** — register remote clusters ArgoCD-style by pasting a kubeconfig (settings page, admin only) and switch via the header dropdown. Credentials are stored only in a Secret on the local cluster; nothing is installed on target clusters.
+- **Multi-cluster** — register remote clusters by pasting a kubeconfig (settings page, admin only) and switch via the header dropdown. Credentials are stored only in a Secret on the cluster running the dashboard; nothing is installed on target clusters.
 
 ---
 
@@ -181,8 +181,8 @@ Probes: `/healthz` (live) · `/readyz` (ready) · `/metrics` (Prometheus). Logs 
 ### Why a generic engine instead of per-kind structures
 The initial design had dedicated providers for `HTTPRoute`/`VirtualService`. But Istio + Gateway API span ~20 kinds with evolving CRD versions; per-kind models scale maintenance linearly and break on version changes. → Switched to **dynamic client + auto-generated forms from CRD OpenAPI schemas**: adding a kind is one registry line, and schema changes are absorbed automatically. Curated forms can still be layered on for a few kinds that need them.
 
-### Why ArgoCD-style accounts instead of token passthrough
-The first implementation passed the user's Kubernetes bearer token through, authorizing with cluster RBAC — accurate, but issuing/delivering/renewing tokens per user was operationally painful and login UX was poor. → Switched to **app-local accounts (ConfigMap) + roles** like ArgoCD, with all cluster operations under a single SA identity. The downside (K8s audit logs show the SA, not the user) is offset by the dashboard's own change history recording account names. If per-user K8s RBAC parity becomes necessary, this can be extended with Impersonation.
+### Why app-local accounts instead of token passthrough
+The first implementation passed the user's Kubernetes bearer token through, authorizing with cluster RBAC — accurate, but issuing/delivering/renewing tokens per user was operationally painful and login UX was poor. → Switched to **app-local accounts (ConfigMap) + roles**, with all cluster operations under a single SA identity. The downside (K8s audit logs show the SA, not the user) is offset by the dashboard's own change history recording account names. If per-user K8s RBAC parity becomes necessary, this can be extended with Impersonation.
 
 ### Why no real-time SSE streams
 The design stage considered per-user watch → SSE live sync. But keeping the server stateless for HA means opening a watch per connection — replicas × concurrent users watch connections against the API server. For an internal ops tool (tens of concurrent users, low change frequency) that cost wasn't justified. → Kept the server stateless and converged on the **in-memory change history** (30s refresh) plus manual refresh. *A deliberate trade: "unbreakable stateless HA" over "nice-to-have real-time".*
@@ -199,7 +199,7 @@ periplus/
 ├─ cmd/server/main.go          # entrypoint: ServeMux, probes/metrics, graceful shutdown
 ├─ internal/
 │  ├─ api/                     # JSON handlers (resources CRUD, login/accounts, capabilities, history, flow map)
-│  ├─ auth/                    # local accounts (bcrypt) + HMAC sessions (ArgoCD-style)
+│  ├─ auth/                    # local accounts (bcrypt) + HMAC sessions
 │  ├─ k8s/                     # dynamic client factory, kind registry, discovery, reference lookups
 │  ├─ assets/                  # built React (dist) embed + SPA fallback
 │  └─ observability/           # slog logging, Prometheus metrics
@@ -235,7 +235,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 
 ## Permission model
 
-Same structure as ArgoCD — cluster permissions and user permissions are separated:
+Permissions come in two separate layers — cluster permissions and user permissions:
 
 | Layer | Owner | Scope |
 |---|---|---|

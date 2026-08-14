@@ -24,6 +24,12 @@ function useFlowCanvas(edges: Edge[], offsets: Offsets) {
       const c = containerRef.current
       if (!c) return
       const cb = c.getBoundingClientRect()
+      // 드래그로 노드가 아래 경계를 넘으면 캔버스를 그만큼 늘려 배경이 따라오게 한다
+      let maxBottom = 0
+      for (const el of nodeRefs.current.values()) {
+        maxBottom = Math.max(maxBottom, el.getBoundingClientRect().bottom - cb.top)
+      }
+      c.style.minHeight = `${Math.ceil(maxBottom)}px`
       const seen = new Set<string>()
       const out: typeof paths = []
       for (const e of edges) {
@@ -166,8 +172,9 @@ export function FlowMap() {
 
 // 드래그(이동) + 클릭(선택)을 분리하는 래퍼. 3px 이상 움직이면 드래그로 보고
 // 클릭 선택을 무시한다. 카드 안의 링크는 stopPropagation으로 드래그를 피한다.
+// 노드는 캔버스(bounds) 밖으로 못 나간다 — 도트 배경 밖으로 끌려나가면 이상해 보인다.
 function DraggableNode({
-  id, offsets, setOffsets, onSelect, dimmed, nodeRef, children, className = '',
+  id, offsets, setOffsets, onSelect, dimmed, nodeRef, bounds, children, className = '',
 }: {
   id: string
   offsets: Offsets
@@ -175,17 +182,32 @@ function DraggableNode({
   onSelect: () => void
   dimmed: boolean
   nodeRef: (el: HTMLElement | null) => void
+  bounds: React.RefObject<HTMLDivElement | null>
   children: ReactNode
   className?: string
 }) {
-  const drag = useRef<{ px: number; py: number; ox: number; oy: number; moved: boolean } | null>(null)
+  const drag = useRef<{
+    px: number; py: number; ox: number; oy: number; moved: boolean
+    minX: number; maxX: number; minY: number; maxY: number
+  } | null>(null)
   const o = offsets[id] ?? { x: 0, y: 0 }
   return (
     <div
       ref={nodeRef}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => {
-        drag.current = { px: e.clientX, py: e.clientY, ox: o.x, oy: o.y, moved: false }
+        const r = e.currentTarget.getBoundingClientRect()
+        const cb = bounds.current?.getBoundingClientRect()
+        // 오프셋 제외한 기준 위치로 캔버스 내 이동 가능 범위를 계산해 둔다
+        const baseL = r.left - o.x
+        const baseT = r.top - o.y
+        drag.current = {
+          px: e.clientX, py: e.clientY, ox: o.x, oy: o.y, moved: false,
+          minX: cb ? cb.left - baseL : -Infinity,
+          maxX: cb ? cb.right - baseL - r.width : Infinity,
+          minY: cb ? cb.top - baseT : -Infinity,
+          maxY: Infinity, // 아래로는 제한 없음 — 캔버스가 따라 늘어난다
+        }
         e.currentTarget.setPointerCapture(e.pointerId)
       }}
       onPointerMove={(e) => {
@@ -194,7 +216,11 @@ function DraggableNode({
         const dx = e.clientX - d.px
         const dy = e.clientY - d.py
         if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-        if (d.moved) setOffsets((prev) => ({ ...prev, [id]: { x: d.ox + dx, y: d.oy + dy } }))
+        if (d.moved) {
+          const x = Math.min(Math.max(d.ox + dx, d.minX), d.maxX)
+          const y = Math.min(Math.max(d.oy + dy, d.minY), d.maxY)
+          setOffsets((prev) => ({ ...prev, [id]: { x, y } }))
+        }
       }}
       onPointerUp={() => {
         const d = drag.current
@@ -285,6 +311,7 @@ function FlowSection({
   const select = (id: string) => () => setSelected((cur) => (cur === id ? null : id))
   const nodeProps = (id: string) => ({
     id, offsets, setOffsets, onSelect: select(id), dimmed: dimmed(id), nodeRef: setRef(id),
+    bounds: containerRef,
   })
 
   return (

@@ -1,4 +1,4 @@
-// Package auth implements ArgoCD-style local accounts: users live in a mounted
+// Package auth implements app-local accounts: users live in a mounted
 // ConfigMap (one file per user, content "role:bcryptHash"), login issues an
 // HMAC-signed session cookie, and the app's role — not per-user Kubernetes RBAC —
 // authorizes writes. All Kubernetes calls run as the pod's ServiceAccount.

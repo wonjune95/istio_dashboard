@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "periplus.labels" . | nindent 4 }}
 ---
-# ArgoCD 방식: 모든 클러스터 작업은 이 SA 하나로 수행하고, 사용자 권한은 앱의
+# 모든 클러스터 작업은 이 SA 하나로 수행하고, 사용자 권한은 앱의
 # 역할(admin/editor/viewer)이 결정한다. 따라서 SA가 관리 대상 CRD 전체의 CRUD
 # 권한을 가진다.
 apiVersion: rbac.authorization.k8s.io/v1
