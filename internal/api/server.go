@@ -73,6 +73,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /api/audit", s.withAuth(http.HandlerFunc(s.handleAudit)))
 	// 설정 기반 인그레스 트래픽 흐름도 (Gateway → Route → Service)
 	mux.Handle("GET /api/flowmap", s.withAuth(http.HandlerFunc(s.handleFlowMap)))
+	// 경로 시뮬레이터 — 설정만으로 요청이 어느 룰에 매치되는지 계산 (트래픽 없음)
+	mux.Handle("GET /api/routematch", s.withAuth(http.HandlerFunc(s.handleRouteMatch)))
 	// Unmatched /api/* returns JSON 404 (not the SPA index.html fallback).
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NotFound", "no such API endpoint: "+r.URL.Path)

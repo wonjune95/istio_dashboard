@@ -8,6 +8,7 @@ import { Login } from './pages/Login'
 import { Home } from './pages/Home'
 import { Overview } from './pages/Overview'
 import { FlowMap } from './pages/FlowMap'
+import { RouteCheck } from './pages/RouteCheck'
 import { ResourceList } from './pages/ResourceList'
 import { ResourceEdit } from './pages/ResourceEdit'
 import { Settings } from './pages/Settings'
@@ -34,6 +35,7 @@ export function App() {
         <Route path="/" element={<Home />} />
         <Route path="/overview" element={<Overview />} />
         <Route path="/flowmap" element={<FlowMap />} />
+        <Route path="/routecheck" element={<RouteCheck />} />
         <Route path="/resources/:type" element={<ResourceList />} />
         <Route path="/resources/:type/new" element={<ResourceEdit />} />
         <Route path="/resources/:type/:ns/:name" element={<ResourceEdit />} />

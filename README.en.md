@@ -23,6 +23,7 @@
 - **Write safety first** — every write goes through `dry-run` validation → a `kubectl diff`-style preview → apply. Optimistic locking via `resourceVersion` detects 409 conflicts and shows *your edit vs the server's latest*; high-risk kinds require typing the resource name to confirm. Every change made through the dashboard is recorded in the home page's **change history** with the account name.
 - **Stateless HA · air-gapped** — a single Go binary embedding the React SPA via `embed.FS`. No server-side session store (signed cookies), so it scales horizontally, and zero CDN dependencies means it runs in closed networks out of the box.
 - **Generic resource engine** — built on the dynamic client, not tied to specific CRDs. 12 Istio kinds + 7 Gateway API kinds through one CRUD pipeline.
+- **Route check** — compute which routing rule a request (host, path, headers) matches, with no traffic sent. It also explains why the other rules did not match, so canary and header-based routing can be debugged in place.
 - **Multi-cluster** — register remote clusters by pasting a kubeconfig (settings page, admin only) and switch via the header dropdown. Credentials are stored only in a Secret on the cluster running the dashboard; nothing is installed on target clusters.
 
 ---
@@ -91,6 +92,15 @@ Draws the traffic path purely from routing configuration — no metrics dependen
 - **Interaction** — click a node to spotlight only the paths through it, dimming everything else. Drag nodes to rearrange; hover a card and use the ↗ icon to jump to the resource editor.
 
 ![Traffic flow map — selecting a node highlights its paths](docs/screenshot-flowmap.png)
+
+### Route check (simulator)
+Enter a host, path, method and headers, and Periplus computes which rule the request matches and where it goes — **without sending any request**. No traffic, no side effects, and no extra permissions (viewers can use it).
+
+- **Shows the evaluation** — not just the winning rule, but **every rule that did not match and why** (which condition failed). That answers "why didn't it take this rule?" directly.
+- **Verifies the destination** — service existence and endpoint count, plus whether the `subset` is actually defined in a DestinationRule (a typo there silently blackholes traffic).
+- **Models precedence correctly** — Istio takes the first match in declaration order; Gateway API follows the spec (path type → path length → method → header count). PathPrefix segment boundaries are respected (`/api` does not match `/apifoo`).
+
+![Route check — matched rule and destination](docs/screenshot-routecheck.png)
 
 ### Role-aware UI + change history
 - The UI checks the logged-in account's role up front: for viewers, forms and apply/delete buttons turn **read-only**. The server enforces the same rule (403), so the UI can't be bypassed.

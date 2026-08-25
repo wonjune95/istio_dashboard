@@ -748,3 +748,124 @@ func TestClustersList_Status(t *testing.T) {
 		t.Fatalf("unreachable prod should be connected=false: %s", rec.Body.String())
 	}
 }
+
+// 경로 시뮬레이터: VS는 선언 순서 첫 매치가 이기고(헤더 조건 포함), 매치 실패한
+// 룰은 이유와 함께 남는다. HTTPRoute는 순서가 아니라 우선순위(exact > prefix)로 이긴다.
+func TestRouteMatch(t *testing.T) {
+	kube := kubefake.NewClientset(
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "shop", Namespace: "dev"}},
+		&corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "shop", Namespace: "dev"},
+			Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "10.0.0.1"}}}}},
+	)
+	istio := istiofake.NewSimpleClientset()
+	if _, err := istio.NetworkingV1().VirtualServices("dev").Create(context.Background(),
+		&istionet.VirtualService{ObjectMeta: metav1.ObjectMeta{Name: "shop-vs", Namespace: "dev"},
+			Spec: istioapi.VirtualService{
+				Hosts:    []string{"shop.example.com"},
+				Gateways: []string{"istio-system/gw"},
+				Http: []*istioapi.HTTPRoute{
+					{ // 카나리: x-user=beta 헤더가 있을 때만 v2
+						Match: []*istioapi.HTTPMatchRequest{{
+							Headers: map[string]*istioapi.StringMatch{
+								"x-user": {MatchType: &istioapi.StringMatch_Exact{Exact: "beta"}},
+							},
+						}},
+						Route: []*istioapi.HTTPRouteDestination{
+							{Destination: &istioapi.Destination{Host: "shop", Subset: "v2"}}},
+					},
+					{ // 기본 경로
+						Route: []*istioapi.HTTPRouteDestination{
+							{Destination: &istioapi.Destination{Host: "shop", Subset: "v1"}}},
+					},
+				},
+			}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := istio.NetworkingV1().DestinationRules("dev").Create(context.Background(),
+		&istionet.DestinationRule{ObjectMeta: metav1.ObjectMeta{Name: "shop-dr", Namespace: "dev"},
+			Spec: istioapi.DestinationRule{Host: "shop", Subsets: []*istioapi.Subset{{Name: "v1"}}}},
+		metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	exact, prefix := gwapi.PathMatchExact, gwapi.PathMatchPathPrefix
+	pApi, pApiUsers := "/api", "/api/users"
+	gw := gwfake.NewSimpleClientset(
+		&gwapi.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "api-hr", Namespace: "dev"},
+			Spec: gwapi.HTTPRouteSpec{
+				Hostnames: []gwapi.Hostname{"api.example.com"},
+				Rules: []gwapi.HTTPRouteRule{
+					{Matches: []gwapi.HTTPRouteMatch{{Path: &gwapi.HTTPPathMatch{Type: &prefix, Value: &pApi}}}},
+					{Matches: []gwapi.HTTPRouteMatch{{Path: &gwapi.HTTPPathMatch{Type: &exact, Value: &pApiUsers}}}},
+				},
+			}},
+	)
+	mux := newTestMux(t, &stubSource{clients: &k8s.Clients{Kube: kube, Istio: istio, Gateway: gw}})
+	get := func(q string) routeMatchResult {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, authedReq("GET", "/api/routematch?"+q, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var out routeMatchResult
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// 헤더 없음 → 1번 룰 불매치, 2번(기본) 룰이 이긴다
+	out := get("host=shop.example.com&path=/cart")
+	if !out.Matched || len(out.Destinations) != 1 || out.Destinations[0].Subset != "v1" {
+		t.Fatalf("기본 경로가 v1이어야 함: %+v", out)
+	}
+	if out.Destinations[0].Endpoints != 1 || !out.Destinations[0].Exists {
+		t.Fatalf("목적지 실체 확인 실패: %+v", out.Destinations[0])
+	}
+	if !out.Destinations[0].SubsetOK || out.Destinations[0].SubsetDR != "shop-dr" {
+		t.Fatalf("v1 subset은 DR에 정의돼 있어야 함: %+v", out.Destinations[0])
+	}
+	var rejected *routeCandidate
+	for i := range out.Candidates {
+		if !out.Candidates[i].Matched {
+			rejected = &out.Candidates[i]
+		}
+	}
+	if rejected == nil || !strings.Contains(rejected.Reason, "x-user") {
+		t.Fatalf("불매치 이유에 헤더가 나와야 함: %+v", out.Candidates)
+	}
+
+	// 헤더 있음 → 1번 룰(v2)이 이긴다. v2는 DR에 없으므로 subsetOk=false
+	out = get("host=shop.example.com&path=/cart&header=x-user:beta")
+	if !out.Matched || out.Destinations[0].Subset != "v2" {
+		t.Fatalf("헤더가 있으면 v2로 가야 함: %+v", out)
+	}
+	if out.Destinations[0].SubsetOK {
+		t.Fatal("v2 subset은 DR에 없으므로 subsetOk=false여야 함")
+	}
+
+	// 호스트 불일치 → 매치 없음
+	if out = get("host=other.example.com&path=/"); out.Matched {
+		t.Fatalf("다른 호스트는 매치되면 안 됨: %+v", out)
+	}
+
+	// HTTPRoute: 선언 순서상 prefix가 먼저지만 exact가 우선순위로 이긴다
+	out = get("host=api.example.com&path=/api/users")
+	if !out.Matched {
+		t.Fatalf("HTTPRoute 매치 실패: %+v", out)
+	}
+	var winner *routeCandidate
+	for i := range out.Candidates {
+		if out.Candidates[i].Winner {
+			winner = &out.Candidates[i]
+		}
+	}
+	if winner == nil || winner.RuleIndex != 1 {
+		t.Fatalf("exact 룰(index 1)이 이겨야 함: %+v", out.Candidates)
+	}
+
+	// PathPrefix는 세그먼트 경계 — /apifoo는 /api prefix에 걸리면 안 된다
+	if out = get("host=api.example.com&path=/apifoo"); out.Matched {
+		t.Fatalf("/apifoo는 /api prefix에 매치되면 안 됨: %+v", out)
+	}
+}
