@@ -93,8 +93,8 @@ Draws the traffic path purely from routing configuration — no metrics dependen
 
 ![Traffic flow map — selecting a node highlights its paths](docs/screenshot-flowmap.png)
 
-### Route check (simulator)
-Enter a host, path, method and headers, and Periplus computes which rule the request matches and where it goes — **without sending any request**. No traffic, no side effects, and no extra permissions (viewers can use it).
+### Request console — route check (simulator)
+Compose a request Postman-style (method, URL, headers, body) and verify it two ways. **Route check** computes which rule the request matches and where it goes — **without sending any request**. No traffic, no side effects, and no extra permissions (viewers can use it).
 
 - **Shows the evaluation** — not just the winning rule, but **every rule that did not match and why** (which condition failed). That answers "why didn't it take this rule?" directly.
 - **Verifies the destination** — service existence and endpoint count, plus whether the `subset` is actually defined in a DestinationRule (a typo there silently blackholes traffic).
@@ -103,7 +103,7 @@ Enter a host, path, method and headers, and Periplus computes which rule the req
 ![Route check — matched rule and destination](docs/screenshot-routecheck.png)
 
 ### Send a real request (opt-in)
-Right below the route-check form, Periplus can **send that request from inside a pod you pick**. It goes through that pod's sidecar, so routing, authorization and mTLS are exercised for real — not "this is how it should route" but "this is how it routed".
+The same request can be **sent from inside a pod you pick in the Source tab**. It goes through that pod's sidecar, so routing, authorization and mTLS are exercised for real — not "this is how it should route" but "this is how it routed".
 
 - **Responses read in Istio terms** — `403` + `RBAC: access denied` → denied by an AuthorizationPolicy; `503` + `upstream connect error` → mTLS mismatch or no healthy endpoint; presence of Envoy headers → whether the sidecar was actually traversed. Upstream service time (`x-envoy-upstream-service-time`) is shown alongside.
 - **Three locks** — (1) Helm opt-in (`requestTester.enabled=true`, off by default), (2) admin only, (3) argv built without a shell, plus input validation (scheme, method, header newlines) and timeout/response-size caps. Every test request is audit-logged with user, source pod and target URL.

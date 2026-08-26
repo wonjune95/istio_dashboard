@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useCapabilities } from '../api/capabilities'
 import { ApiError } from '../api/client'
@@ -8,174 +8,307 @@ import { sendRequestTest, usePods, type RequestTestResult } from '../api/request
 import { Icon } from '../components/icons'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
+type KV = { key: string; value: string; on: boolean }
+type ReqTab = 'headers' | 'body' | 'source'
+type ResTab = 'body' | 'headers' | 'route'
 
-// 요청이 어느 라우팅 룰에 매치되어 어디로 가는지 설정으로 계산해 보여준다.
-// 실제 요청을 보내지 않으므로 부작용이 없다.
+// URL 한 줄에서 시뮬레이터가 쓸 호스트/경로를 뽑는다 (Istio 호스트에는 포트가 없다).
+function parseUrl(raw: string) {
+  try {
+    const u = new URL(raw.includes('://') ? raw : `http://${raw}`)
+    return { hostname: u.hostname, path: u.pathname + u.search, href: u.toString() }
+  } catch {
+    return null
+  }
+}
+
+// 요청 하나를 작성해 두 가지로 확인한다 — 설정상 어디로 가는지(경로 확인),
+// 그리고 실제로 어떻게 응답하는지(보내기, opt-in).
 export function RouteCheck() {
   const caps = useCapabilities()
-  const [host, setHost] = useState('')
-  const [path, setPath] = useState('/')
+  const testerOn = !!caps.data?.requestTester && caps.data.role === 'admin'
+
   const [method, setMethod] = useState('GET')
-  const [headers, setHeaders] = useState([{ key: '', value: '' }])
-  const [result, setResult] = useState<RouteMatchResult | null>(null)
+  const [url, setUrl] = useState('')
+  const [headers, setHeaders] = useState<KV[]>([{ key: '', value: '', on: true }])
+  const [body, setBody] = useState('')
+  const [ns, setNs] = useState('')
+  const [pod, setPod] = useState('')
+  const [container, setContainer] = useState('')
+
+  const [reqTab, setReqTab] = useState<ReqTab>('headers')
+  const [resTab, setResTab] = useState<ResTab>('route')
+  const [route, setRoute] = useState<RouteMatchResult | null>(null)
+  const [res, setRes] = useState<RequestTestResult | null>(null)
   const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'' | 'check' | 'send'>('')
 
-  const setHeader = (i: number, patch: Partial<{ key: string; value: string }>) =>
-    setHeaders((prev) => prev.map((h, j) => (i === j ? { ...h, ...patch } : h)))
+  const parsed = useMemo(() => parseUrl(url.trim()), [url])
+  const activeHeaders = headers.filter((h) => h.on && h.key.trim())
+  const hasBody = method !== 'GET' && method !== 'HEAD'
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!host.trim() || busy) return
-    setBusy(true)
-    setError('')
+  const check = async () => {
+    if (!parsed || busy) return
+    setBusy('check'); setError('')
     try {
-      setResult(await checkRoute({ host: host.trim(), path, method, headers }))
+      setRoute(await checkRoute({
+        host: parsed.hostname, path: parsed.path, method,
+        headers: activeHeaders.map(({ key, value }) => ({ key, value })),
+      }))
+      setResTab('route')
     } catch (err) {
-      setResult(null)
-      setError(err instanceof ApiError ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+      setRoute(null); setError(err instanceof ApiError ? err.message : String(err))
+    } finally { setBusy('') }
   }
 
+  const send = async () => {
+    if (!parsed || !ns || !pod || !container || busy) return
+    setBusy('send'); setError('')
+    try {
+      const h: Record<string, string> = {}
+      for (const x of activeHeaders) h[x.key.trim()] = x.value.trim()
+      setRes(await sendRequestTest({
+        namespace: ns, pod, container, method, url: parsed.href, headers: h,
+        body: hasBody && body ? body : undefined,
+      }))
+      setResTab('body')
+    } catch (err) {
+      setRes(null); setError(err instanceof ApiError ? err.message : String(err))
+    } finally { setBusy('') }
+  }
+
+  const canSend = testerOn && !!parsed && !!ns && !!pod && !!container && !busy
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-semibold text-strong">경로 확인</h2>
+        <h2 className="text-xl font-semibold text-strong">요청 콘솔</h2>
         <p className="mt-1 text-sm text-muted">
-          요청이 어느 VirtualService·HTTPRoute 룰에 매치되어 어디로 가는지 설정으로 계산합니다. 실제 요청은 보내지 않습니다.
+          요청을 하나 작성해서 <strong className="text-strong">경로 확인</strong>(설정상 어느 룰로 가는지 계산)과{' '}
+          <strong className="text-strong">보내기</strong>(파드 안에서 실제 요청)로 검증합니다.
         </p>
       </div>
 
-      <form onSubmit={submit} className="panel space-y-3 rounded-xl p-5">
-        <div className="flex flex-wrap gap-2">
-          <select value={method} onChange={(e) => setMethod(e.target.value)} className="input-base !w-28 shrink-0">
-            {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <input
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder="호스트 (예: shop.example.com)"
-            autoComplete="off"
-            className="input-base min-w-0 flex-1"
-          />
-          <input
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="/경로?쿼리=값"
-            autoComplete="off"
-            className="input-base min-w-0 flex-1"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted">헤더 (카나리 라우팅 확인용)</p>
-          {headers.map((h, i) => (
-            <div key={i} className="flex gap-2">
-              <input
-                value={h.key}
-                onChange={(e) => setHeader(i, { key: e.target.value })}
-                placeholder="이름 (예: x-user)"
-                autoComplete="off"
-                className="input-base min-w-0 flex-1"
-              />
-              <input
-                value={h.value}
-                onChange={(e) => setHeader(i, { value: e.target.value })}
-                placeholder="값 (예: beta)"
-                autoComplete="off"
-                className="input-base min-w-0 flex-1"
-              />
-              <button
-                type="button"
-                onClick={() => setHeaders((prev) => (prev.length === 1 ? [{ key: '', value: '' }] : prev.filter((_, j) => j !== i)))}
-                className="btn-ghost shrink-0 px-2.5"
-                title="헤더 삭제"
-              >
-                −
-              </button>
-            </div>
-          ))}
-          <button type="button" onClick={() => setHeaders((prev) => [...prev, { key: '', value: '' }])} className="text-xs text-accent hover:underline">
-            + 헤더 추가
-          </button>
-        </div>
-
-        <button type="submit" disabled={!host.trim() || busy} className="btn-primary disabled:opacity-50">
-          {busy ? '계산 중…' : '경로 확인'}
+      {/* URL 바 */}
+      <div className="panel flex flex-wrap items-center gap-2 rounded-xl p-3">
+        <select value={method} onChange={(e) => setMethod(e.target.value)} className="input-base !w-28 shrink-0 font-medium">
+          {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void check() }}
+          placeholder="http://petclinic.kotra.com/api/owners"
+          autoComplete="off"
+          spellCheck={false}
+          className="input-base min-w-[16rem] flex-1 font-mono text-sm"
+        />
+        <button onClick={check} disabled={!parsed || !!busy} className="btn-ghost shrink-0 disabled:opacity-50">
+          {busy === 'check' ? '계산 중…' : '경로 확인'}
         </button>
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      </form>
+        <button
+          onClick={send}
+          disabled={!canSend}
+          title={!testerOn ? '요청 테스터가 꺼져 있습니다 — 출발 탭 참고' : !ns || !pod ? '출발 탭에서 파드를 고르세요' : ''}
+          className="btn-primary shrink-0 disabled:opacity-40"
+        >
+          {busy === 'send' ? '보내는 중…' : '보내기'}
+        </button>
+      </div>
+      {url && !parsed && <p className="text-sm text-red-600 dark:text-red-400">URL 형식을 확인하세요.</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {result && <Result result={result} />}
+      {/* 요청 편집 */}
+      <div className="panel rounded-xl">
+        <Tabs
+          tabs={[
+            { id: 'headers', label: '헤더', count: activeHeaders.length },
+            ...(hasBody ? [{ id: 'body', label: '본문' as const }] : []),
+            { id: 'source', label: '출발', hint: pod || (testerOn ? '미선택' : '꺼짐') },
+          ]}
+          active={reqTab}
+          onChange={(t) => setReqTab(t as ReqTab)}
+        />
+        <div className="p-4">
+          {reqTab === 'headers' && <HeaderEditor headers={headers} setHeaders={setHeaders} />}
+          {reqTab === 'body' && hasBody && (
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder='{"name": "값"}'
+              rows={6}
+              spellCheck={false}
+              className="input-base w-full font-mono text-xs"
+            />
+          )}
+          {reqTab === 'source' && (
+            <SourcePicker
+              enabled={testerOn}
+              isAdmin={caps.data?.role === 'admin'}
+              ns={ns} setNs={(v) => { setNs(v); setPod('') }}
+              pod={pod} setPod={setPod}
+              container={container} setContainer={setContainer}
+            />
+          )}
+        </div>
+      </div>
 
-      {caps.data?.requestTester && caps.data.role === 'admin' && (
-        <RequestTester host={host} path={path} method={method} headers={headers} />
+      {/* 응답 */}
+      {(route || res) && (
+        <div className="panel rounded-xl">
+          <Tabs
+            tabs={[
+              ...(res ? [{ id: 'body' as const, label: '응답 본문' }] : []),
+              ...(res?.headers ? [{ id: 'headers' as const, label: '응답 헤더', count: Object.keys(res.headers).length }] : []),
+              ...(route ? [{ id: 'route' as const, label: '경로 분석' }] : []),
+            ]}
+            active={resTab}
+            onChange={(t) => setResTab(t as ResTab)}
+            right={res ? <ResponseStatus res={res} /> : undefined}
+          />
+          <div className="p-4">
+            {resTab === 'body' && res && <ResponseBody res={res} />}
+            {resTab === 'headers' && res?.headers && (
+              <dl className="grid grid-cols-[minmax(9rem,auto)_1fr] gap-x-4 gap-y-1.5 font-mono text-xs">
+                {Object.entries(res.headers).map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt className="truncate text-muted">{k}</dt>
+                    <dd className="break-all text-strong">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {resTab === 'route' && route && <RouteResult result={route} />}
+          </div>
+        </div>
       )}
     </div>
   )
 }
 
-// 실제 요청 보내기 — 위 폼의 호스트·경로·헤더를 그대로 쓰고, 출발 파드만 더 고른다.
-function RequestTester({
-  host, path, method, headers,
+function Tabs({
+  tabs, active, onChange, right,
 }: {
-  host: string
-  path: string
-  method: string
-  headers: { key: string; value: string }[]
+  tabs: { id: string; label: string; count?: number; hint?: string }[]
+  active: string
+  onChange: (id: string) => void
+  right?: ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-1 border-b border-base px-2">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          className={`-mb-px border-b-2 px-3 py-2.5 text-sm transition ${
+            active === t.id ? 'border-accent font-medium text-accent' : 'border-transparent text-muted hover:text-strong'
+          }`}
+        >
+          {t.label}
+          {t.count ? <span className="ml-1.5 text-xs text-faint">{t.count}</span> : null}
+          {t.hint ? <span className="ml-1.5 max-w-[10rem] truncate align-bottom text-xs text-faint">{t.hint}</span> : null}
+        </button>
+      ))}
+      {right && <div className="ml-auto pr-2">{right}</div>}
+    </div>
+  )
+}
+
+function HeaderEditor({ headers, setHeaders }: { headers: KV[]; setHeaders: (f: (p: KV[]) => KV[]) => void }) {
+  const patch = (i: number, p: Partial<KV>) => setHeaders((prev) => prev.map((h, j) => (i === j ? { ...h, ...p } : h)))
+  return (
+    <div className="space-y-2">
+      {headers.map((h, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={h.on}
+            onChange={(e) => patch(i, { on: e.target.checked })}
+            title="이 헤더 사용"
+            className="h-4 w-4 shrink-0 accent-blue-600"
+          />
+          <input
+            value={h.key}
+            onChange={(e) => patch(i, { key: e.target.value })}
+            placeholder="이름 (예: x-user)"
+            autoComplete="off"
+            className="input-base min-w-0 flex-1 font-mono text-xs"
+          />
+          <input
+            value={h.value}
+            onChange={(e) => patch(i, { value: e.target.value })}
+            placeholder="값 (예: beta)"
+            autoComplete="off"
+            className="input-base min-w-0 flex-1 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => setHeaders((prev) => (prev.length === 1 ? [{ key: '', value: '', on: true }] : prev.filter((_, j) => j !== i)))}
+            className="btn-ghost shrink-0 px-2.5"
+            title="삭제"
+          >
+            −
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={() => setHeaders((prev) => [...prev, { key: '', value: '', on: true }])} className="text-xs text-accent hover:underline">
+        + 헤더 추가
+      </button>
+    </div>
+  )
+}
+
+// 출발 파드 선택. 기능이 꺼져 있어도 탭은 남기고 켜는 방법을 안내한다.
+function SourcePicker({
+  enabled, isAdmin, ns, setNs, pod, setPod, container, setContainer,
+}: {
+  enabled: boolean
+  isAdmin: boolean
+  ns: string
+  setNs: (v: string) => void
+  pod: string
+  setPod: (v: string) => void
+  container: string
+  setContainer: (v: string) => void
 }) {
   const namespaces = useNamespaces()
-  const [ns, setNs] = useState('')
-  const pods = usePods(ns, ns !== '')
-  const [pod, setPod] = useState('')
-  const [container, setContainer] = useState('')
-  const [body, setBody] = useState('')
-  const [res, setRes] = useState<RequestTestResult | null>(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
+  const pods = usePods(ns, enabled && ns !== '')
   const selected = pods.data?.find((p) => p.name === pod)
-  // 파드가 바뀌면 앱 컨테이너(사이드카가 아닌 첫 컨테이너)를 기본으로 잡는다
+
   useEffect(() => {
     if (!selected) return
-    setContainer((cur) =>
-      selected.containers.includes(cur) ? cur : selected.containers.find((c) => c !== 'istio-proxy') ?? selected.containers[0] ?? '',
-    )
-  }, [selected])
-
-  const url = host ? `http://${host}${path || '/'}` : ''
-  const canSend = !!ns && !!pod && !!container && !!host && !busy
-
-  const send = async () => {
-    if (!canSend) return
-    setBusy(true)
-    setError('')
-    try {
-      const h: Record<string, string> = {}
-      for (const x of headers) if (x.key.trim()) h[x.key.trim()] = x.value.trim()
-      setRes(await sendRequestTest({ namespace: ns, pod, container, method, url, headers: h, body: body || undefined }))
-    } catch (err) {
-      setRes(null)
-      setError(err instanceof ApiError ? err.message : String(err))
-    } finally {
-      setBusy(false)
+    if (!selected.containers.includes(container)) {
+      setContainer(selected.containers.find((c) => c !== 'istio-proxy') ?? selected.containers[0] ?? '')
     }
+  }, [selected, container, setContainer])
+
+  if (!enabled) {
+    return (
+      <div className="space-y-2 text-sm">
+        <p className="text-muted">
+          <strong className="text-strong">실제 요청 보내기</strong>는 꺼져 있습니다. 켜면 고른 파드 안에서 요청을 보내
+          사이드카를 통과한 실제 응답(라우팅·인가·mTLS 결과)을 확인할 수 있습니다.
+        </p>
+        {isAdmin ? (
+          <>
+            <p className="text-xs text-muted">헬름 값으로 켭니다 — ServiceAccount에 <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">pods/exec</code> 권한이 붙습니다(모든 파드에서 명령 실행 가능).</p>
+            <pre className="panel-soft overflow-x-auto rounded-lg p-3 text-xs">helm upgrade periplus deploy/helm -n periplus \
+  --reuse-values --set requestTester.enabled=true</pre>
+          </>
+        ) : (
+          <p className="text-xs text-muted">admin만 사용할 수 있는 기능입니다.</p>
+        )}
+      </div>
+    )
   }
 
   return (
-    <div className="panel space-y-3 rounded-xl p-5">
-      <div>
-        <h3 className="text-sm font-semibold text-strong">실제 요청 보내기</h3>
-        <p className="mt-1 text-xs text-muted">
-          고른 파드 안에서 위 요청을 실제로 보냅니다. 그 파드의 사이드카를 통과하므로 라우팅·인가·mTLS가 실제로 어떻게
-          동작하는지 확인됩니다. <span className="text-amber-600 dark:text-amber-400">진짜 트래픽이므로 부작용이 있을 수 있습니다.</span>
-        </p>
-      </div>
-
+    <div className="space-y-3">
+      <p className="text-xs text-muted">
+        고른 파드 안에서 요청을 보냅니다. <span className="text-amber-600 dark:text-amber-400">실제 트래픽이라 부작용이 있을 수 있습니다.</span>
+      </p>
       <div className="flex flex-wrap gap-2">
-        <select value={ns} onChange={(e) => { setNs(e.target.value); setPod('') }} className="input-base !w-52 shrink-0">
+        <select value={ns} onChange={(e) => setNs(e.target.value)} className="input-base !w-56 shrink-0">
           <option value="">네임스페이스 선택</option>
           {(namespaces.data ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
@@ -191,95 +324,67 @@ function RequestTester({
           </select>
         )}
       </div>
-
       {selected && !selected.mesh && (
         <p className="text-xs text-amber-600 dark:text-amber-400">
           이 파드에는 사이드카(istio-proxy)가 없습니다 — Istio 라우팅을 거치지 않으므로 VirtualService 검증에는 쓸 수 없습니다.
         </p>
       )}
-
-      {method !== 'GET' && method !== 'HEAD' && (
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="요청 본문 (선택)"
-          rows={3}
-          spellCheck={false}
-          className="input-base w-full font-mono text-xs"
-        />
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button onClick={send} disabled={!canSend} className="btn-primary disabled:opacity-50">
-          {busy ? '보내는 중…' : '실제 요청 보내기'}
-        </button>
-        {url && <code className="truncate text-xs text-muted">{method} {url}</code>}
-      </div>
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-
-      {res && <RequestResult res={res} />}
     </div>
   )
 }
 
-function RequestResult({ res }: { res: RequestTestResult }) {
-  const ok = res.status && res.status < 400
+function ResponseStatus({ res }: { res: RequestTestResult }) {
+  const ok = !!res.status && res.status < 400
   return (
-    <div className="space-y-3 border-t border-gray-200 pt-3 dark:border-slate-700">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        {res.status ? (
-          <span className={`chip ${ok
-            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-            : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
-            {res.status} {res.statusText}
-          </span>
-        ) : (
-          <span className="chip bg-red-500/10 text-red-600 dark:text-red-400">응답 없음</span>
-        )}
-        <span className="text-xs text-muted">{res.durationMs}ms</span>
-        {res.headers?.['x-envoy-upstream-service-time'] && (
-          <span className="chip bg-accent-soft text-accent">업스트림 {res.headers['x-envoy-upstream-service-time']}ms</span>
-        )}
-        {res.truncated && <span className="chip bg-gray-500/10 text-gray-500 dark:text-slate-400">응답 잘림</span>}
-      </div>
-
-      {res.hint && (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-strong">{res.hint}</p>
+    <div className="flex items-center gap-2 text-xs">
+      {res.status ? (
+        <span className={`chip ${ok ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+          {res.status} {res.statusText}
+        </span>
+      ) : (
+        <span className="chip bg-red-500/10 text-red-600 dark:text-red-400">응답 없음</span>
       )}
-      {res.error && <p className="text-sm text-red-600 dark:text-red-400">{res.error}</p>}
-
-      {res.headers && Object.keys(res.headers).length > 0 && (
-        <details className="text-xs">
-          <summary className="cursor-pointer text-muted">응답 헤더 {Object.keys(res.headers).length}개</summary>
-          <dl className="mt-2 grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-3 gap-y-1 font-mono">
-            {Object.entries(res.headers).map(([k, v]) => (
-              <div key={k} className="contents">
-                <dt className="truncate text-muted">{k}</dt>
-                <dd className="break-all text-strong">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      )}
-
-      {res.body && (
-        <pre className="panel-soft max-h-72 overflow-auto rounded-lg p-3 text-xs text-strong">{res.body}</pre>
-      )}
+      <span className="text-muted">{res.durationMs}ms</span>
+      {res.body && <span className="text-muted">{formatBytes(res.body.length)}</span>}
     </div>
   )
 }
 
-function Result({ result }: { result: RouteMatchResult }) {
+function ResponseBody({ res }: { res: RequestTestResult }) {
+  const pretty = useMemo(() => {
+    if (!res.body) return ''
+    try {
+      return JSON.stringify(JSON.parse(res.body), null, 2)
+    } catch {
+      return res.body
+    }
+  }, [res.body])
+
+  return (
+    <div className="space-y-3">
+      {res.hint && <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-strong">{res.hint}</p>}
+      {res.error && <p className="text-sm text-red-600 dark:text-red-400">{res.error}</p>}
+      {res.headers?.['x-envoy-upstream-service-time'] && (
+        <p className="text-xs text-muted">업스트림 처리 {res.headers['x-envoy-upstream-service-time']}ms · Envoy 경유</p>
+      )}
+      {pretty && <pre className="panel-soft max-h-96 overflow-auto rounded-lg p-3 text-xs text-strong">{pretty}</pre>}
+      {res.truncated && <p className="text-xs text-muted">응답이 너무 커서 잘렸습니다.</p>}
+    </div>
+  )
+}
+
+function formatBytes(n: number) {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`
+}
+
+function RouteResult({ result }: { result: RouteMatchResult }) {
   return (
     <div className="space-y-4">
-      <div className={`rounded-xl border p-4 ${result.matched
-        ? 'border-emerald-500/30 bg-emerald-500/5'
-        : 'border-amber-500/30 bg-amber-500/5'}`}>
+      <div className={`rounded-xl border p-4 ${result.matched ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
         <div className="flex items-center gap-2 text-sm font-medium">
           <Icon name={result.matched ? 'check' : 'warning'} className={`h-4 w-4 ${result.matched ? 'text-emerald-500' : 'text-amber-500'}`} />
           {result.matched ? '매치되는 라우트를 찾았습니다' : '매치되는 라우트가 없습니다'}
         </div>
-
         {result.destinations.length > 0 && (
           <div className="mt-3 space-y-2">
             {result.destinations.map((d, i) => (
@@ -288,9 +393,7 @@ function Result({ result }: { result: RouteMatchResult }) {
                   {d.host}{d.port ? <span className="font-normal text-muted">:{d.port}</span> : null}
                 </span>
                 {d.subset && (
-                  <span className={`chip ${d.subsetOk === false
-                    ? 'bg-red-500/10 text-red-600 dark:text-red-400'
-                    : 'bg-accent-soft text-accent'}`}>
+                  <span className={`chip ${d.subsetOk === false ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-accent-soft text-accent'}`}>
                     subset {d.subset}{d.subsetOk === false ? ' · DR에 정의 없음' : ''}
                   </span>
                 )}
@@ -298,9 +401,7 @@ function Result({ result }: { result: RouteMatchResult }) {
                 {d.external ? (
                   <span className="chip bg-gray-500/10 text-gray-500 dark:text-slate-400">외부 호스트</span>
                 ) : d.exists ? (
-                  <span className={`chip ${d.endpoints > 0
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+                  <span className={`chip ${d.endpoints > 0 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
                     엔드포인트 {d.endpoints}
                   </span>
                 ) : (
@@ -310,20 +411,17 @@ function Result({ result }: { result: RouteMatchResult }) {
             ))}
           </div>
         )}
-
         {result.notes?.map((n, i) => <p key={i} className="mt-2 text-xs text-muted">· {n}</p>)}
       </div>
 
-      <div className="panel rounded-xl p-5">
-        <h3 className="mb-3 text-sm font-semibold text-strong">평가 과정</h3>
+      <div>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-faint">평가 과정</h4>
         {result.candidates.length === 0 ? (
           <p className="text-sm text-muted">이 호스트를 다루는 라우트가 없습니다.</p>
         ) : (
           <ul className="space-y-2">
             {result.candidates.map((c, i) => (
-              <li key={i} className={`rounded-lg border p-3 text-sm ${c.winner
-                ? 'border-accent bg-accent-soft'
-                : c.matched ? 'border-base' : 'border-base opacity-70'}`}>
+              <li key={i} className={`rounded-lg border p-3 text-sm ${c.winner ? 'border-accent bg-accent-soft' : c.matched ? 'border-base' : 'border-base opacity-70'}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`chip ${c.matched ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-gray-500/10 text-gray-500 dark:text-slate-400'}`}>
                     {c.matched ? '매치' : '불매치'}

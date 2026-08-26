@@ -26,7 +26,7 @@ export function Sidebar() {
         <Icon name="bolt" className="h-4 w-4" /> 트래픽 흐름
       </NavLink>
       <NavLink to="/routecheck" className={topLink('mb-3')}>
-        <Icon name="check" className="h-4 w-4" /> 경로 확인
+        <Icon name="check" className="h-4 w-4" /> 요청 콘솔
       </NavLink>
 
       {isLoading && <div className="px-2 text-xs text-faint">로딩 중…</div>}
