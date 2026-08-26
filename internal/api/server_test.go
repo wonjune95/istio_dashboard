@@ -958,8 +958,8 @@ func TestRequestTester(t *testing.T) {
 		}
 	}
 
-	// curl이 없는 컨테이너
-	src.execOut, src.execErrS, src.execErr = "", "executable file not found in $PATH", errors.New("exit 126")
+	// curl이 없는 컨테이너 — 이 사실은 stderr가 아니라 exec 에러로 올라온다
+	src.execOut, src.execErrS, src.execErr = "", "", errors.New(`OCI runtime exec failed: exec: "curl": executable file not found in $PATH`)
 	rec = send(on, adminCookie, body)
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if !strings.Contains(out.Error, "curl이 없습니다") {

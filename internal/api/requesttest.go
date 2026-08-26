@@ -231,11 +231,16 @@ func parseCurlOutput(raw string, out *reqTestResult) {
 	out.Body = body
 }
 
+// summarizeExecError는 stderr와 exec 에러를 함께 본다 — curl이 없으면 그 사실은
+// stderr가 아니라 kubelet의 exec 에러로 올라온다.
 func summarizeExecError(err error, stderr string) string {
 	msg := strings.TrimSpace(stderr)
+	all := msg + " " + err.Error()
 	switch {
-	case strings.Contains(msg, "executable file not found"), strings.Contains(msg, "no such file or directory"):
-		return "이 컨테이너에 curl이 없습니다 (distroless 이미지 등). curl이 있는 다른 파드를 고르세요."
+	case strings.Contains(all, "executable file not found"), strings.Contains(all, "no such file or directory"):
+		return "이 컨테이너에 curl이 없습니다 (distroless 이미지 등). curl이 있는 다른 파드나 컨테이너를 고르세요."
+	case strings.Contains(all, "container not found"):
+		return "그 이름의 컨테이너가 없습니다."
 	case msg != "":
 		return msg
 	default:
