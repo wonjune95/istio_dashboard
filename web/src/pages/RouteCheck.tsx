@@ -9,7 +9,6 @@ import { Icon } from '../components/icons'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 type KV = { key: string; value: string; on: boolean }
-type ReqTab = 'headers' | 'body' | 'source'
 type ResTab = 'body' | 'headers' | 'route'
 
 // URL 한 줄에서 시뮬레이터가 쓸 호스트/경로를 뽑는다 (Istio 호스트에는 포트가 없다).
@@ -36,7 +35,6 @@ export function RouteCheck() {
   const [pod, setPod] = useState('')
   const [container, setContainer] = useState('')
 
-  const [reqTab, setReqTab] = useState<ReqTab>('headers')
   const [resTab, setResTab] = useState<ResTab>('route')
   const [route, setRoute] = useState<RouteMatchResult | null>(null)
   const [res, setRes] = useState<RequestTestResult | null>(null)
@@ -109,7 +107,7 @@ export function RouteCheck() {
         <button
           onClick={send}
           disabled={!canSend}
-          title={!testerOn ? '요청 테스터가 꺼져 있습니다 — 출발 탭 참고' : !ns || !pod ? '출발 탭에서 파드를 고르세요' : ''}
+          title={!testerOn ? '요청 테스터가 꺼져 있습니다 — 아래 출발 항목 참고' : !ns || !pod ? '아래 출발에서 파드를 고르세요' : ''}
           className="btn-primary shrink-0 disabled:opacity-40"
         >
           {busy === 'send' ? '보내는 중…' : '보내기'}
@@ -118,39 +116,34 @@ export function RouteCheck() {
       {url && !parsed && <p className="text-sm text-red-600 dark:text-red-400">URL 형식을 확인하세요.</p>}
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {/* 요청 편집 */}
+      {/* 요청 편집 — 출발지를 먼저 정하고 헤더·본문을 아래에서 채운다 */}
       <div className="panel rounded-xl">
-        <Tabs
-          tabs={[
-            { id: 'headers', label: '헤더', count: activeHeaders.length },
-            ...(hasBody ? [{ id: 'body', label: '본문' as const }] : []),
-            { id: 'source', label: '출발', hint: pod || (testerOn ? '미선택' : '꺼짐') },
-          ]}
-          active={reqTab}
-          onChange={(t) => setReqTab(t as ReqTab)}
-        />
-        <div className="p-4">
-          {reqTab === 'headers' && <HeaderEditor headers={headers} setHeaders={setHeaders} />}
-          {reqTab === 'body' && hasBody && (
+        <Section title="출발" hint={testerOn ? undefined : '요청 테스터 꺼짐 — 경로 확인만 가능'}>
+          <SourcePicker
+            enabled={testerOn}
+            isAdmin={caps.data?.role === 'admin'}
+            ns={ns} setNs={(v) => { setNs(v); setPod('') }}
+            pod={pod} setPod={setPod}
+            container={container} setContainer={setContainer}
+          />
+        </Section>
+
+        <Section title="헤더" hint={activeHeaders.length ? `${activeHeaders.length}개 사용` : undefined} bordered>
+          <HeaderEditor headers={headers} setHeaders={setHeaders} />
+        </Section>
+
+        {hasBody && (
+          <Section title="본문" bordered>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder='{"name": "값"}'
-              rows={6}
+              rows={5}
               spellCheck={false}
               className="input-base w-full font-mono text-xs"
             />
-          )}
-          {reqTab === 'source' && (
-            <SourcePicker
-              enabled={testerOn}
-              isAdmin={caps.data?.role === 'admin'}
-              ns={ns} setNs={(v) => { setNs(v); setPod('') }}
-              pod={pod} setPod={setPod}
-              container={container} setContainer={setContainer}
-            />
-          )}
-        </div>
+          </Section>
+        )}
       </div>
 
       {/* 응답 */}
@@ -183,6 +176,26 @@ export function RouteCheck() {
         </div>
       )}
     </div>
+  )
+}
+
+// 요청 편집 패널의 한 구획 (제목 + 내용). 탭 대신 한 화면에 쌓는다.
+function Section({
+  title, hint, bordered, children,
+}: {
+  title: string
+  hint?: string
+  bordered?: boolean
+  children: ReactNode
+}) {
+  return (
+    <section className={`space-y-2.5 p-4 ${bordered ? 'border-t border-gray-200 dark:border-slate-700' : ''}`}>
+      <div className="flex items-baseline gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">{title}</h3>
+        {hint && <span className="text-xs text-muted">{hint}</span>}
+      </div>
+      {children}
+    </section>
   )
 }
 
