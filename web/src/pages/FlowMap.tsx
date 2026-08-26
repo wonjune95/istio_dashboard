@@ -336,7 +336,7 @@ function FlowSection({
           })}
         </svg>
         <div className="relative flex items-start gap-16">
-          <DraggableNode {...nodeProps('src')} className="w-24 shrink-0 self-center">
+          <DraggableNode {...nodeProps('src')} className="w-24 shrink-0 self-start pt-1">
             <div className="flex flex-col items-center">
               <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg" style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}>
                 <Icon name={srcIcon} className="h-6 w-6" />

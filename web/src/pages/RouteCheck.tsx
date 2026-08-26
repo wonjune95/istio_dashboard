@@ -98,7 +98,7 @@ export function RouteCheck() {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void check() }}
-          placeholder="http://petclinic.kotra.com/api/owners"
+          placeholder="http://shop.example.com/api/orders"
           autoComplete="off"
           spellCheck={false}
           className="input-base min-w-[16rem] flex-1 font-mono text-sm"
