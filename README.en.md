@@ -109,6 +109,8 @@ The same request can be **sent from inside a pod you pick in the Source tab**. I
 - **Three locks** — (1) Helm opt-in (`requestTester.enabled=true`, off by default), (2) admin only, (3) argv built without a shell, plus input validation (scheme, method, header newlines) and timeout/response-size caps. Every test request is audit-logged with user, source pod and target URL.
 - **The cost of enabling it** — the ServiceAccount gains `pods` read and `pods/exec` create, which is effectively arbitrary command execution in any pod. That's why it ships off. If the target container has no `curl` (distroless), the UI says so.
 
+To try it: `kubectl apply -f deploy/examples/demo-mesh.yaml` brings up sidecar-injected `echo` v1/v2 plus a curl client, so you can watch the `x-user: beta` canary split both ways (clean up with `kubectl delete namespace periplus-demo`).
+
 ![Request console — a real response sent from inside a pod](docs/screenshot-requesttest.png)
 
 ### Role-aware UI + change history

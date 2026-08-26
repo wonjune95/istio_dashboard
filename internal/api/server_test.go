@@ -966,3 +966,56 @@ func TestRequestTester(t *testing.T) {
 		t.Fatalf("curl 부재 안내가 없음: %+v", out)
 	}
 }
+
+
+// 파드 목록: Istio 1.29+ 네이티브 사이드카(restartPolicy=Always인 initContainer)도
+// 메시로 인식해야 한다. 일반 init 컨테이너는 exec 대상이 아니므로 목록에서 뺀다.
+func TestPodList_NativeSidecar(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	kube := kubefake.NewClientset(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "curl-1", Namespace: "demo"},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "istio-init"},                             // 진짜 init — 제외
+					{Name: "istio-proxy", RestartPolicy: &always},    // 네이티브 사이드카
+				},
+				Containers: []corev1.Container{{Name: "curl"}},
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-1", Namespace: "demo"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+	)
+	mux := http.NewServeMux()
+	srv := NewServer(false, &stubSource{clients: &k8s.Clients{Kube: kube}},
+		auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{})
+	srv.EnableRequestTester()
+	srv.Routes(mux)
+	req := httptest.NewRequest("GET", "/api/pods?ns=demo", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  "periplus_session",
+		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	var pods []podRef
+	if err := json.Unmarshal(rec.Body.Bytes(), &pods); err != nil {
+		t.Fatalf("%v (body=%s)", err, rec.Body.String())
+	}
+	if len(pods) != 2 {
+		t.Fatalf("pods = %+v", pods)
+	}
+	if !pods[0].Mesh {
+		t.Fatalf("네이티브 사이드카 파드를 메시로 인식해야 함: %+v", pods[0])
+	}
+	if strings.Join(pods[0].Containers, ",") != "istio-proxy,curl" {
+		t.Fatalf("일반 init 컨테이너는 빠지고 사이드카는 남아야 함: %v", pods[0].Containers)
+	}
+	if pods[1].Mesh {
+		t.Fatalf("사이드카 없는 파드는 메시가 아니어야 함: %+v", pods[1])
+	}
+}

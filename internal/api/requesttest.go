@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -57,6 +58,17 @@ func (s *Server) handlePods(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ref := podRef{Name: p.Name, Ready: true}
+		// Istio 1.29+는 사이드카를 네이티브 사이드카(restartPolicy=Always인
+		// initContainer)로 주입한다 — 두 목록을 모두 봐야 메시 여부를 안다.
+		for _, c := range p.Spec.InitContainers {
+			if c.RestartPolicy == nil || *c.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+				continue // 진짜 init 컨테이너는 이미 종료돼 exec 대상이 아니다
+			}
+			ref.Containers = append(ref.Containers, c.Name)
+			if c.Name == "istio-proxy" {
+				ref.Mesh = true
+			}
+		}
 		for _, c := range p.Spec.Containers {
 			ref.Containers = append(ref.Containers, c.Name)
 			if c.Name == "istio-proxy" {
@@ -255,12 +267,18 @@ func istioHint(status int, body string, headers map[string]string) string {
 		return "AuthorizationPolicy가 요청을 거부했습니다."
 	case status == 503 && strings.Contains(body, "upstream connect error"):
 		return "사이드카가 업스트림에 연결하지 못했습니다 — mTLS 설정 불일치이거나 정상 엔드포인트가 없습니다."
-	case status == 404 && headers["server"] == "istio-envoy":
+	case status == 404 && viaEnvoy(headers):
 		return "Envoy까지는 갔지만 매치되는 라우트가 없습니다 — 호스트/경로를 확인하세요 (경로 확인 기능으로 대조해 보세요)."
 	case status == 0:
 		return ""
-	case headers["server"] != "istio-envoy" && headers["x-envoy-upstream-service-time"] == "":
+	case !viaEnvoy(headers):
 		return "응답에 Envoy 흔적이 없습니다 — 사이드카를 거치지 않았을 수 있습니다(메시 밖 파드이거나 직접 접근)."
 	}
 	return ""
+}
+
+// viaEnvoy reports whether the response came through a sidecar/gateway.
+// server 헤더는 버전·설정에 따라 "istio-envoy" 또는 "envoy"로 온다.
+func viaEnvoy(headers map[string]string) bool {
+	return strings.Contains(headers["server"], "envoy") || headers["x-envoy-upstream-service-time"] != ""
 }
