@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useFlowMap,
@@ -57,7 +57,9 @@ function useFlowCanvas(edges: Edge[], offsets: Offsets) {
     if (el) nodeRefs.current.set(id, el)
     else nodeRefs.current.delete(id)
   }
-  return { containerRef, setRef, paths }
+  // 드래그 중에만 호출된다 — 렌더 경로에서 ref를 읽지 않는다.
+  const getBounds = useCallback(() => containerRef.current?.getBoundingClientRect(), [])
+  return { containerRef, setRef, paths, getBounds }
 }
 
 // 선택 노드의 상류(유입 경로) + 하류(유출 경로) 집합. 형제 경로는 포함하지 않는다.
@@ -174,7 +176,7 @@ export function FlowMap() {
 // 클릭 선택을 무시한다. 카드 안의 링크는 stopPropagation으로 드래그를 피한다.
 // 노드는 캔버스(bounds) 밖으로 못 나간다 — 도트 배경 밖으로 끌려나가면 이상해 보인다.
 function DraggableNode({
-  id, offsets, setOffsets, onSelect, dimmed, nodeRef, bounds, children, className = '',
+  id, offsets, setOffsets, onSelect, dimmed, nodeRef, getBounds, children, className = '',
 }: {
   id: string
   offsets: Offsets
@@ -182,7 +184,8 @@ function DraggableNode({
   onSelect: () => void
   dimmed: boolean
   nodeRef: (el: HTMLElement | null) => void
-  bounds: React.RefObject<HTMLDivElement | null>
+  // 캔버스 경계는 포인터 이벤트 시점에만 읽는다 (렌더 중 ref 접근 금지).
+  getBounds: () => DOMRect | undefined
   children: ReactNode
   className?: string
 }) {
@@ -197,7 +200,7 @@ function DraggableNode({
       onClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => {
         const r = e.currentTarget.getBoundingClientRect()
-        const cb = bounds.current?.getBoundingClientRect()
+        const cb = getBounds()
         // 오프셋 제외한 기준 위치로 캔버스 내 이동 가능 범위를 계산해 둔다
         const baseL = r.left - o.x
         const baseT = r.top - o.y
@@ -304,14 +307,14 @@ function FlowSection({
 }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [offsets, setOffsets] = useState<Offsets>({})
-  const { containerRef, setRef, paths } = useFlowCanvas(edges, offsets)
+  const { containerRef, setRef, paths, getBounds } = useFlowCanvas(edges, offsets)
   const highlight = useMemo(() => computeHighlight(selected, edges), [selected, edges])
 
   const dimmed = (id: string) => !!highlight && !highlight.has(id)
   const select = (id: string) => () => setSelected((cur) => (cur === id ? null : id))
   const nodeProps = (id: string) => ({
     id, offsets, setOffsets, onSelect: select(id), dimmed: dimmed(id), nodeRef: setRef(id),
-    bounds: containerRef,
+    getBounds,
   })
 
   return (
