@@ -23,7 +23,8 @@
 - **Write safety first** — every write goes through `dry-run` validation → a `kubectl diff`-style preview → apply. Optimistic locking via `resourceVersion` detects 409 conflicts and shows *your edit vs the server's latest*; high-risk kinds require typing the resource name to confirm. Every change made through the dashboard is recorded in the home page's **change history** with the account name.
 - **Stateless HA · air-gapped** — a single Go binary embedding the React SPA via `embed.FS`. No server-side session store (signed cookies), so it scales horizontally, and zero CDN dependencies means it runs in closed networks out of the box.
 - **Generic resource engine** — built on the dynamic client, not tied to specific CRDs. 12 Istio kinds + 7 Gateway API kinds through one CRUD pipeline.
-- **Route check** — compute which routing rule a request (host, path, headers) matches, with no traffic sent. It also explains why the other rules did not match, so canary and header-based routing can be debugged in place.
+- **Traffic flow map** — draws ingress/egress paths from routing configuration alone. Click a node to spotlight its path; dead ends (missing service, zero endpoints) show up as red edges.
+- **Request console** — write one request and verify it two ways: **route check** computes which rule it matches with no traffic (including why the others did not), and **send** issues the real request from inside a pod you choose, through its sidecar (opt-in, admin only).
 - **Multi-cluster** — register remote clusters by pasting a kubeconfig (settings page, admin only) and switch via the header dropdown. Credentials are stored only in a Secret on the cluster running the dashboard; nothing is installed on target clusters.
 
 ---
@@ -103,7 +104,7 @@ Compose a request Postman-style (method, URL, headers, body) and verify it two w
 ![Route check — matched rule and destination](docs/screenshot-routecheck.png)
 
 ### Send a real request (opt-in)
-The same request can be **sent from inside a pod you pick in the Source tab**. It goes through that pod's sidecar, so routing, authorization and mTLS are exercised for real — not "this is how it should route" but "this is how it routed".
+The same request can be **sent from inside a pod you pick under Source**. It goes through that pod's sidecar, so routing, authorization and mTLS are exercised for real — not "this is how it should route" but "this is how it routed".
 
 - **Responses read in Istio terms** — `403` + `RBAC: access denied` → denied by an AuthorizationPolicy; `503` + `upstream connect error` → mTLS mismatch or no healthy endpoint; presence of Envoy headers → whether the sidecar was actually traversed. Upstream service time (`x-envoy-upstream-service-time`) is shown alongside.
 - **Three locks** — (1) Helm opt-in (`requestTester.enabled=true`, off by default), (2) admin only, (3) argv built without a shell, plus input validation (scheme, method, header newlines) and timeout/response-size caps. Every test request is audit-logged with user, source pod and target URL.
@@ -151,7 +152,7 @@ docker push <registry>/periplus:<tag>
 helm install periplus ./deploy/helm -n istio-system \
   --set image.repository=<registry>/periplus --set image.tag=<tag>
 ```
-Key values: `image.*`, `imagePullSecrets` (private registries), `replicaCount` (stateless — scale for HA), `accountsConfigMap`, `clustersSecret`. The pod runs distroless non-root (uid 65532) with readOnlyRootFilesystem.
+Key values: `image.*`, `imagePullSecrets` (private registries), `replicaCount` (stateless — scale for HA), `accountsConfigMap`, `clustersSecret`, `requestTester.enabled` (real request tester — off by default; enabling it grants `pods/exec`). The pod runs distroless non-root (uid 65532) with readOnlyRootFilesystem.
 
 ### 3) Expose — attach an HTTPRoute to your cluster's Gateway
 ```bash
@@ -220,16 +221,17 @@ The design stage considered per-user watch → SSE live sync. But keeping the se
 periplus/
 ├─ cmd/server/main.go          # entrypoint: ServeMux, probes/metrics, graceful shutdown
 ├─ internal/
-│  ├─ api/                     # JSON handlers (resources CRUD, login/accounts, capabilities, history, flow map)
+│  ├─ api/                     # JSON handlers (resources CRUD, login/accounts/clusters, capabilities,
+│  │                           #  flow map, route simulator, request tester, change history)
 │  ├─ auth/                    # local accounts (bcrypt) + HMAC sessions
-│  ├─ k8s/                     # dynamic client factory, kind registry, discovery, reference lookups
+│  ├─ k8s/                     # per-cluster client factory, kind registry, discovery, lookups, pod exec
 │  ├─ assets/                  # built React (dist) embed + SPA fallback
 │  └─ observability/           # slog logging, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
 ├─ hack/bcrypt-hash.go         # password hash helper
 ├─ deploy/
 │  ├─ helm/                    # chart: deployment / service / rbac / values
-│  └─ examples/                # accounts-configmap.yaml · httproute.yaml
+│  └─ examples/                # accounts-configmap.yaml · httproute.yaml · demo-mesh.yaml
 ├─ .github/workflows/          # ci.yml (test/build) · release.yml (tag → ghcr.io image + chart)
 ├─ Dockerfile  go.mod
 ```
@@ -273,7 +275,7 @@ Both the chart and image are published to ghcr.io, so no clone is needed:
 ```bash
 # install (pick any namespace; image defaults to the prebuilt ghcr one)
 helm install periplus oci://ghcr.io/wonjune95/charts/periplus \
-  --version 0.4.0 -n istio-system
+  --version 0.5.0 -n istio-system
 
 # try it before exposing
 kubectl -n istio-system port-forward svc/periplus 8080:8080

@@ -23,7 +23,8 @@
 - **쓰기 안전 우선** — 모든 쓰기는 `dry-run` 선검증 → `kubectl diff` 스타일 미리보기 → 적용. `resourceVersion` 낙관적 락으로 409 충돌을 감지해 *내 수정본 vs 서버 최신본*을 대조하고, 고위험 kind는 이름 타이핑 확인을 요구한다. 대시보드를 거친 모든 변경은 홈의 **변경 히스토리**에 계정명과 함께 기록된다.
 - **무상태 HA · 에어갭** — Go `embed.FS`에 React SPA를 내장한 단일 바이너리. 서버가 세션 저장소를 갖지 않아(서명 쿠키) N개 복제본으로 수평 확장되고, 외부 CDN 의존이 0이라 폐쇄망에서 즉시 구동된다.
 - **제네릭 리소스 엔진** — 특정 CRD에 종속되지 않는 dynamic client 기반. Istio 12종 + Gateway API 7종을 하나의 CRUD 파이프라인으로 다룬다.
-- **경로 확인** — 요청(호스트·경로·헤더)이 어느 라우팅 룰에 매치되는지 실제 트래픽 없이 계산한다. 불매치한 룰의 이유까지 보여줘 카나리·헤더 라우팅 디버깅이 툴 안에서 끝난다.
+- **트래픽 흐름도** — 라우팅 설정만으로 인그레스/이그레스 경로를 그래프로 그린다. 노드를 클릭하면 그 경로만 부각되고, 끊긴 경로(서비스 없음·엔드포인트 0)는 빨간 엣지로 드러난다.
+- **요청 콘솔** — 요청 하나를 작성해 두 가지로 검증한다: **경로 확인**은 트래픽 없이 어느 룰에 매치되는지 계산하고(불매치 사유까지), **보내기**는 고른 파드 안에서 실제 요청을 보내 사이드카를 통과한 응답을 보여준다(opt-in, admin 전용).
 - **멀티클러스터** — kubeconfig를 붙여넣는 것만으로 원격 클러스터를 등록하고(설정 페이지, admin), 헤더 드롭다운으로 전환한다. 자격증명은 대시보드가 있는 클러스터의 Secret에만 저장되고, 대상 클러스터에는 아무것도 설치하지 않는다.
 
 ---
@@ -103,7 +104,7 @@ Postman처럼 메서드·URL·헤더·본문을 한 화면에서 작성하고, �
 ![경로 확인 — 매치된 룰과 목적지](docs/screenshot-routecheck.png)
 
 ### 실제 요청 보내기 (opt-in)
-같은 요청을 **출발 탭에서 고른 파드 안에서 실제로 보낸다**. 그 파드의 사이드카를 통과하므로 라우팅·인가·mTLS가 실제로 어떻게 동작하는지 확인된다("설정상 이렇게 간다"가 아니라 "정말 이렇게 갔다").
+같은 요청을 **출발에서 고른 파드 안에서 실제로 보낸다**. 그 파드의 사이드카를 통과하므로 라우팅·인가·mTLS가 실제로 어떻게 동작하는지 확인된다("설정상 이렇게 간다"가 아니라 "정말 이렇게 갔다").
 
 - **응답을 Istio 문맥으로 해석** — `403` + `RBAC: access denied` → AuthorizationPolicy 거부, `503` + `upstream connect error` → mTLS 불일치나 엔드포인트 없음, Envoy 헤더 유무 → 사이드카를 실제로 통과했는지. 업스트림 처리 시간(`x-envoy-upstream-service-time`)도 함께 보여준다.
 - **3중 잠금** — ① 헬름 opt-in(`requestTester.enabled=true`, 기본 꺼짐) ② admin 전용 ③ 셸을 거치지 않는 argv 구성 + 입력 검증(스킴·메서드·헤더 개행) + 타임아웃·응답 크기 상한. 누가 어느 파드에서 어디로 보냈는지 감사 로그에 남는다.
@@ -151,7 +152,7 @@ docker push <registry>/periplus:<tag>
 helm install periplus ./deploy/helm -n istio-system \
   --set image.repository=<registry>/periplus --set image.tag=<tag>
 ```
-주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`(무상태라 늘리면 그대로 HA), `accountsConfigMap`(계정 ConfigMap 이름). 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다.
+주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`(무상태라 늘리면 그대로 HA), `accountsConfigMap`(계정 ConfigMap), `clustersSecret`(멀티클러스터), `requestTester.enabled`(실제 요청 테스터 — 기본 꺼짐, 켜면 `pods/exec` 권한이 붙는다). 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다.
 
 ### 3) 노출 — 클러스터의 Gateway에 HTTPRoute 부착
 ```bash
@@ -220,17 +221,19 @@ kubectl -n istio-system edit configmap periplus-accounts
 periplus/
 ├─ cmd/server/main.go          # 엔트리포인트: ServeMux, 프로브/metrics, graceful shutdown
 ├─ internal/
-│  ├─ api/                     # JSON 핸들러 (resources CRUD, login/계정, capabilities, 변경 히스토리)
+│  ├─ api/                     # JSON 핸들러 (resources CRUD, login/계정/클러스터, capabilities,
+│  │                           #  흐름도, 경로 시뮬레이터, 요청 테스터, 변경 히스토리)
 │  ├─ auth/                    # 로컬 계정(bcrypt) + HMAC 세션
-│  ├─ k8s/                     # dynamic client 팩토리, kind 레지스트리, discovery, 참조 조회
+│  ├─ k8s/                     # 클러스터별 client 팩토리, kind 레지스트리, discovery, 참조 조회, 파드 exec
 │  ├─ assets/                  # 빌드된 React(dist) embed + SPA fallback
 │  └─ observability/           # slog 로깅, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
 ├─ hack/bcrypt-hash.go         # 계정 비밀번호 해시 생성 헬퍼
 ├─ deploy/
 │  ├─ helm/                    # Chart: deployment / service / rbac / values
-│  └─ examples/                # accounts-configmap.yaml(계정) · httproute.yaml(노출 예시)
-├─ .github/workflows/          # ci.yml(테스트·빌드) · release.yml(태그 → ghcr.io 이미지 발행)
+│  └─ examples/                # accounts-configmap.yaml(계정) · httproute.yaml(노출)
+│                             #  demo-mesh.yaml(파드 간 통신 데모)
+├─ .github/workflows/          # ci.yml(테스트·빌드) · release.yml(태그 → ghcr.io 이미지·차트 발행)
 ├─ Dockerfile  go.mod
 ```
 
@@ -273,7 +276,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 ```bash
 # 설치 (네임스페이스는 원하는 곳으로; 이미지 기본값이 ghcr 프리빌트라 --set 불필요)
 helm install periplus oci://ghcr.io/wonjune95/charts/periplus \
-  --version 0.4.0 -n istio-system
+  --version 0.5.0 -n istio-system
 
 # 노출 전 바로 접속해보기
 kubectl -n istio-system port-forward svc/periplus 8080:8080
