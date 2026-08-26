@@ -1,7 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useCapabilities } from '../api/capabilities'
 import { ApiError } from '../api/client'
+import { useNamespaces } from '../api/namespaces'
 import { checkRoute, type RouteMatchResult } from '../api/routematch'
+import { sendRequestTest, usePods, type RequestTestResult } from '../api/requesttest'
 import { Icon } from '../components/icons'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
@@ -9,6 +12,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 // 요청이 어느 라우팅 룰에 매치되어 어디로 가는지 설정으로 계산해 보여준다.
 // 실제 요청을 보내지 않으므로 부작용이 없다.
 export function RouteCheck() {
+  const caps = useCapabilities()
   const [host, setHost] = useState('')
   const [path, setPath] = useState('/')
   const [method, setMethod] = useState('GET')
@@ -105,6 +109,162 @@ export function RouteCheck() {
       </form>
 
       {result && <Result result={result} />}
+
+      {caps.data?.requestTester && caps.data.role === 'admin' && (
+        <RequestTester host={host} path={path} method={method} headers={headers} />
+      )}
+    </div>
+  )
+}
+
+// 실제 요청 보내기 — 위 폼의 호스트·경로·헤더를 그대로 쓰고, 출발 파드만 더 고른다.
+function RequestTester({
+  host, path, method, headers,
+}: {
+  host: string
+  path: string
+  method: string
+  headers: { key: string; value: string }[]
+}) {
+  const namespaces = useNamespaces()
+  const [ns, setNs] = useState('')
+  const pods = usePods(ns, ns !== '')
+  const [pod, setPod] = useState('')
+  const [container, setContainer] = useState('')
+  const [body, setBody] = useState('')
+  const [res, setRes] = useState<RequestTestResult | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const selected = pods.data?.find((p) => p.name === pod)
+  // 파드가 바뀌면 앱 컨테이너(사이드카가 아닌 첫 컨테이너)를 기본으로 잡는다
+  useEffect(() => {
+    if (!selected) return
+    setContainer((cur) =>
+      selected.containers.includes(cur) ? cur : selected.containers.find((c) => c !== 'istio-proxy') ?? selected.containers[0] ?? '',
+    )
+  }, [selected])
+
+  const url = host ? `http://${host}${path || '/'}` : ''
+  const canSend = !!ns && !!pod && !!container && !!host && !busy
+
+  const send = async () => {
+    if (!canSend) return
+    setBusy(true)
+    setError('')
+    try {
+      const h: Record<string, string> = {}
+      for (const x of headers) if (x.key.trim()) h[x.key.trim()] = x.value.trim()
+      setRes(await sendRequestTest({ namespace: ns, pod, container, method, url, headers: h, body: body || undefined }))
+    } catch (err) {
+      setRes(null)
+      setError(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="panel space-y-3 rounded-xl p-5">
+      <div>
+        <h3 className="text-sm font-semibold text-strong">실제 요청 보내기</h3>
+        <p className="mt-1 text-xs text-muted">
+          고른 파드 안에서 위 요청을 실제로 보냅니다. 그 파드의 사이드카를 통과하므로 라우팅·인가·mTLS가 실제로 어떻게
+          동작하는지 확인됩니다. <span className="text-amber-600 dark:text-amber-400">진짜 트래픽이므로 부작용이 있을 수 있습니다.</span>
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <select value={ns} onChange={(e) => { setNs(e.target.value); setPod('') }} className="input-base !w-52 shrink-0">
+          <option value="">네임스페이스 선택</option>
+          {(namespaces.data ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <select value={pod} onChange={(e) => setPod(e.target.value)} disabled={!ns} className="input-base min-w-0 flex-1 disabled:opacity-50">
+          <option value="">{pods.isLoading ? '불러오는 중…' : '출발 파드 선택'}</option>
+          {(pods.data ?? []).map((p) => (
+            <option key={p.name} value={p.name}>{p.name}{p.mesh ? ' · 메시' : ''}</option>
+          ))}
+        </select>
+        {selected && selected.containers.length > 1 && (
+          <select value={container} onChange={(e) => setContainer(e.target.value)} className="input-base !w-44 shrink-0">
+            {selected.containers.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+      </div>
+
+      {selected && !selected.mesh && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          이 파드에는 사이드카(istio-proxy)가 없습니다 — Istio 라우팅을 거치지 않으므로 VirtualService 검증에는 쓸 수 없습니다.
+        </p>
+      )}
+
+      {method !== 'GET' && method !== 'HEAD' && (
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="요청 본문 (선택)"
+          rows={3}
+          spellCheck={false}
+          className="input-base w-full font-mono text-xs"
+        />
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button onClick={send} disabled={!canSend} className="btn-primary disabled:opacity-50">
+          {busy ? '보내는 중…' : '실제 요청 보내기'}
+        </button>
+        {url && <code className="truncate text-xs text-muted">{method} {url}</code>}
+      </div>
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+      {res && <RequestResult res={res} />}
+    </div>
+  )
+}
+
+function RequestResult({ res }: { res: RequestTestResult }) {
+  const ok = res.status && res.status < 400
+  return (
+    <div className="space-y-3 border-t border-gray-200 pt-3 dark:border-slate-700">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {res.status ? (
+          <span className={`chip ${ok
+            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+            : 'bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+            {res.status} {res.statusText}
+          </span>
+        ) : (
+          <span className="chip bg-red-500/10 text-red-600 dark:text-red-400">응답 없음</span>
+        )}
+        <span className="text-xs text-muted">{res.durationMs}ms</span>
+        {res.headers?.['x-envoy-upstream-service-time'] && (
+          <span className="chip bg-accent-soft text-accent">업스트림 {res.headers['x-envoy-upstream-service-time']}ms</span>
+        )}
+        {res.truncated && <span className="chip bg-gray-500/10 text-gray-500 dark:text-slate-400">응답 잘림</span>}
+      </div>
+
+      {res.hint && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-strong">{res.hint}</p>
+      )}
+      {res.error && <p className="text-sm text-red-600 dark:text-red-400">{res.error}</p>}
+
+      {res.headers && Object.keys(res.headers).length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted">응답 헤더 {Object.keys(res.headers).length}개</summary>
+          <dl className="mt-2 grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-3 gap-y-1 font-mono">
+            {Object.entries(res.headers).map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="truncate text-muted">{k}</dt>
+                <dd className="break-all text-strong">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+
+      {res.body && (
+        <pre className="panel-soft max-h-72 overflow-auto rounded-lg p-3 text-xs text-strong">{res.body}</pre>
+      )}
     </div>
   )
 }

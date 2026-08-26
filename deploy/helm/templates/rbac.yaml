@@ -30,6 +30,16 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces", "services", "endpoints"]
     verbs: ["get", "list"]
+  {{- if (default dict .Values.requestTester).enabled }}
+  # 요청 테스터(opt-in): 출발 파드 선택 + 그 안에서 curl 실행.
+  # exec은 사실상 임의 명령 실행 권한이라 requestTester.enabled=true일 때만 붙는다.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -57,6 +57,11 @@ func main() {
 		api.AccountsCMRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("ACCOUNTS_CONFIGMAP")},
 		// 멀티클러스터: 원격 클러스터 kubeconfig를 담는 Secret (미설정이면 local만)
 		api.ClustersSecretRef{Namespace: os.Getenv("POD_NAMESPACE"), Name: os.Getenv("CLUSTERS_SECRET")})
+	// 실제 요청 테스터는 pods/exec 권한이 필요해 기본 비활성 — 헬름에서 켠다.
+	if os.Getenv("REQUEST_TESTER") == "true" {
+		srv.EnableRequestTester()
+		slog.Info("request tester enabled (admin 전용, pods/exec 사용)")
+	}
 	// admin 계정이 없으면 초기 계정 admin/admin을 만든다.
 	srv.EnsureInitialAdmin(context.Background())
 

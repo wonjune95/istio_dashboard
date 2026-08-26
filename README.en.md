@@ -102,6 +102,13 @@ Enter a host, path, method and headers, and Periplus computes which rule the req
 
 ![Route check — matched rule and destination](docs/screenshot-routecheck.png)
 
+### Send a real request (opt-in)
+Right below the route-check form, Periplus can **send that request from inside a pod you pick**. It goes through that pod's sidecar, so routing, authorization and mTLS are exercised for real — not "this is how it should route" but "this is how it routed".
+
+- **Responses read in Istio terms** — `403` + `RBAC: access denied` → denied by an AuthorizationPolicy; `503` + `upstream connect error` → mTLS mismatch or no healthy endpoint; presence of Envoy headers → whether the sidecar was actually traversed. Upstream service time (`x-envoy-upstream-service-time`) is shown alongside.
+- **Three locks** — (1) Helm opt-in (`requestTester.enabled=true`, off by default), (2) admin only, (3) argv built without a shell, plus input validation (scheme, method, header newlines) and timeout/response-size caps. Every test request is audit-logged with user, source pod and target URL.
+- **The cost of enabling it** — the ServiceAccount gains `pods` read and `pods/exec` create, which is effectively arbitrary command execution in any pod. That's why it ships off. If the target container has no `curl` (distroless), the UI says so.
+
 ### Role-aware UI + change history
 - The UI checks the logged-in account's role up front: for viewers, forms and apply/delete buttons turn **read-only**. The server enforces the same rule (403), so the UI can't be bypassed.
 - The home page's **change history** panel records create/update/delete operations made through the dashboard with account and timestamp (in-memory, last 200 — resets on restart; the structured audit log is the durable record). Home cards also show the actual istiod control-plane version (e.g. `1.30.2`).
@@ -180,6 +187,7 @@ To manage multiple clusters from one dashboard, go to **settings → cluster man
 | `ACCOUNTS_DIR` | `/etc/periplus/accounts` | accounts ConfigMap mount path |
 | `ACCOUNTS_CONFIGMAP` / `POD_NAMESPACE` | (set by Helm) | CM that password changes / initial-admin creation patch |
 | `SESSION_SECRET` | (none) | session cookie signing key; empty = random per boot (restart = re-login) |
+| `REQUEST_TESTER` | (set by Helm) | `true` enables the in-pod request tester (needs pods/exec, admin only) |
 | `CLUSTERS_SECRET` / `POD_NAMESPACE` | (set by Helm) | multi-cluster: Secret holding remote kubeconfigs (empty = local only) |
 
 Probes: `/healthz` (live) · `/readyz` (ready) · `/metrics` (Prometheus). Logs are structured `slog` JSON (request log + write audit log).

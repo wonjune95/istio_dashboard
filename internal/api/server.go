@@ -19,6 +19,8 @@ type ClientSource interface {
 	DetectCRDs() (k8s.CRDInfo, error)
 	SpecSchema(typeID string) (json.RawMessage, error)
 	IstiodVersion(ctx context.Context) string
+	// 요청 테스터 전용: 파드 안에서 argv를 실행한다 (셸 없음).
+	ExecInPod(ctx context.Context, ns, pod, container string, argv []string, maxBytes int) (string, string, error)
 }
 
 // Server holds injected dependencies and exposes the JSON API handlers.
@@ -41,11 +43,16 @@ type Server struct {
 	// 최대 1분 늦게 풀린다; replicaCount>1이 기본이 되면 세션에 실어야 한다.
 	pwChangedMu sync.Mutex
 	pwChanged   map[string]bool
+
+	requestTester bool // 실제 요청 테스터 (헬름 opt-in) — pods/exec 권한이 필요하다
 }
 
 func NewServer(dev bool, factory ClientSource, accounts *auth.Store, sessions *auth.Sessions, accountsCM AccountsCMRef, clustersSecret ClustersSecretRef) *Server {
 	return &Server{dev: dev, factory: factory, accounts: accounts, sessions: sessions, accountsCM: accountsCM, clustersSecret: clustersSecret}
 }
+
+// EnableRequestTester turns on the in-pod request tester (admin 전용, 헬름 opt-in).
+func (s *Server) EnableRequestTester() { s.requestTester = true }
 
 // Routes registers the /api/* handlers on mux. Probes, /metrics and static assets
 // are wired in main.
@@ -75,6 +82,9 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /api/flowmap", s.withAuth(http.HandlerFunc(s.handleFlowMap)))
 	// 경로 시뮬레이터 — 설정만으로 요청이 어느 룰에 매치되는지 계산 (트래픽 없음)
 	mux.Handle("GET /api/routematch", s.withAuth(http.HandlerFunc(s.handleRouteMatch)))
+	// 실제 요청 테스터 (opt-in + admin) — 고른 파드 안에서 curl을 실행한다
+	mux.Handle("GET /api/pods", s.withAuth(http.HandlerFunc(s.handlePods)))
+	mux.Handle("POST /api/requesttest", s.withAuth(http.HandlerFunc(s.handleRequestTest)))
 	// Unmatched /api/* returns JSON 404 (not the SPA index.html fallback).
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "NotFound", "no such API endpoint: "+r.URL.Path)

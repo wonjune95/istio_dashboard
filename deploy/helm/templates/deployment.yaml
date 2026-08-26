@@ -50,6 +50,11 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- if (default dict .Values.requestTester).enabled }}
+            # 실제 요청 테스터 (pods/exec 사용, admin 전용)
+            - name: REQUEST_TESTER
+              value: "true"
+            {{- end }}
             - name: ISTIO_NAMESPACE
               value: {{ .Values.istioNamespace | quote }}
             # client-go / libraries may write under $HOME; point it at a writable

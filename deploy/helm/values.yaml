@@ -24,6 +24,12 @@ accountsConfigMap: periplus-accounts
 # value = kubeconfig). 설정 페이지의 클러스터 등록 UI가 이 Secret을 관리한다.
 clustersSecret: periplus-clusters
 
+# 실제 요청 테스터: 고른 파드 안에서 curl을 실행해 진짜 HTTP 요청을 보낸다.
+# 켜면 SA에 pods 읽기 + pods/exec 권한이 붙는다 — 사실상 모든 파드에서 명령을
+# 실행할 수 있게 되므로, 필요할 때만 의식적으로 켜자 (UI에서도 admin 전용).
+requestTester:
+  enabled: false
+
 resources:
   requests:
     cpu: 50m

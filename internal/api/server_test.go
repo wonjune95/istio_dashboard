@@ -43,6 +43,12 @@ const vsTypeID = "virtualservices.networking.istio.io"
 type stubSource struct {
 	clients *k8s.Clients
 	baseErr error
+
+	// 요청 테스터용: exec 결과를 흉내내고 실제로 만들어진 argv를 캡처한다
+	execOut  string
+	execErrS string
+	execErr  error
+	execArgv []string
 }
 
 func (s *stubSource) Base() (*k8s.Clients, error) {
@@ -66,6 +72,11 @@ func (s *stubSource) CatalogCached() ([]k8s.ResolvedType, error) { return nil, n
 func (s *stubSource) DetectCRDs() (k8s.CRDInfo, error)           { return k8s.CRDInfo{}, nil }
 func (s *stubSource) SpecSchema(string) (json.RawMessage, error) { return nil, errors.New("none") }
 func (s *stubSource) IstiodVersion(context.Context) string       { return "" }
+
+func (s *stubSource) ExecInPod(_ context.Context, _, _, _ string, argv []string, _ int) (string, string, error) {
+	s.execArgv = argv
+	return s.execOut, s.execErrS, s.execErr
+}
 
 var testSessions = auth.NewSessions("test-secret")
 
@@ -867,5 +878,91 @@ func TestRouteMatch(t *testing.T) {
 	// PathPrefix는 세그먼트 경계 — /apifoo는 /api prefix에 걸리면 안 된다
 	if out = get("host=api.example.com&path=/apifoo"); out.Matched {
 		t.Fatalf("/apifoo는 /api prefix에 매치되면 안 됨: %+v", out)
+	}
+}
+
+
+// 요청 테스터: 비활성 시 403, admin이 아니면 403, 켜면 argv를 셸 없이 구성하고
+// curl 출력을 파싱해 Istio 문맥 힌트까지 붙인다.
+func TestRequestTester(t *testing.T) {
+	src := &stubSource{
+		clients: &k8s.Clients{Kube: kubefake.NewClientset()},
+		execOut: "HTTP/1.1 403 Forbidden\r\nserver: istio-envoy\r\nx-envoy-upstream-service-time: 3\r\n\r\nRBAC: access denied",
+	}
+	adminCookie := &http.Cookie{
+		Name:  "periplus_session",
+		Value: testSessions.Sign(auth.Identity{Name: "admin", Role: "admin"}, time.Hour),
+	}
+	body := `{"namespace":"dev","pod":"p1","method":"GET","url":"http://shop.dev:8080/api","headers":{"x-user":"beta"}}`
+	send := func(mux *http.ServeMux, cookie *http.Cookie, payload string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/requesttest", strings.NewReader(payload))
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 기본은 비활성 → 403
+	off := newTestMux(t, src)
+	if rec := send(off, adminCookie, body); rec.Code != http.StatusForbidden {
+		t.Fatalf("비활성 상태에서 403이어야 함: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 활성화하되 editor는 거부
+	on := http.NewServeMux()
+	srv := NewServer(false, src, auth.NewStore(t.TempDir()), testSessions, AccountsCMRef{}, ClustersSecretRef{})
+	srv.EnableRequestTester()
+	srv.Routes(on)
+	editorCookie := &http.Cookie{
+		Name:  "periplus_session",
+		Value: testSessions.Sign(auth.Identity{Name: "bob", Role: "editor"}, time.Hour),
+	}
+	if rec := send(on, editorCookie, body); rec.Code != http.StatusForbidden {
+		t.Fatalf("editor는 403이어야 함: %d", rec.Code)
+	}
+
+	// admin은 통과 — 응답 파싱 + 힌트
+	rec := send(on, adminCookie, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var out reqTestResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != 403 || out.Headers["server"] != "istio-envoy" || out.Body != "RBAC: access denied" {
+		t.Fatalf("curl 출력 파싱 실패: %+v", out)
+	}
+	if !strings.Contains(out.Hint, "AuthorizationPolicy") {
+		t.Fatalf("403 RBAC 힌트가 없음: %q", out.Hint)
+	}
+
+	// argv는 셸을 거치지 않고 구성되고, URL은 "--" 뒤에 온다
+	argv := strings.Join(src.execArgv, " ")
+	if src.execArgv[0] != "curl" || !strings.Contains(argv, "-H x-user: beta") {
+		t.Fatalf("argv 구성이 잘못됨: %v", src.execArgv)
+	}
+	if src.execArgv[len(src.execArgv)-2] != "--" {
+		t.Fatalf("URL 앞에 -- 구분자가 있어야 함: %v", src.execArgv)
+	}
+
+	// 위험한 입력은 거부: 잘못된 스킴, 헤더 개행 주입, 미지원 메서드
+	for _, bad := range []string{
+		`{"namespace":"dev","pod":"p1","url":"file:///etc/passwd"}`,
+		`{"namespace":"dev","pod":"p1","url":"http://x/","headers":{"a":"b\r\nInjected: 1"}}`,
+		`{"namespace":"dev","pod":"p1","url":"http://x/","method":"TRACE"}`,
+		`{"pod":"p1","url":"http://x/"}`,
+	} {
+		if rec := send(on, adminCookie, bad); rec.Code != http.StatusBadRequest {
+			t.Fatalf("거부되어야 할 입력이 통과함 (%s): %d", bad, rec.Code)
+		}
+	}
+
+	// curl이 없는 컨테이너
+	src.execOut, src.execErrS, src.execErr = "", "executable file not found in $PATH", errors.New("exit 126")
+	rec = send(on, adminCookie, body)
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if !strings.Contains(out.Error, "curl이 없습니다") {
+		t.Fatalf("curl 부재 안내가 없음: %+v", out)
 	}
 }

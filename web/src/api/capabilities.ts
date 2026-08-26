@@ -13,6 +13,7 @@ export interface Capabilities {
   user?: string
   role?: string // admin | editor | viewer
   mustChangePassword?: boolean // 초기 비밀번호(admin) 그대로 — 변경 전까지 화면 잠금
+  requestTester?: boolean // 실제 요청 테스터 활성화 (헬름 opt-in, admin 전용)
 }
 
 export function useCapabilities() {

@@ -102,6 +102,13 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 
 ![경로 확인 — 매치된 룰과 목적지](docs/screenshot-routecheck.png)
 
+### 실제 요청 보내기 (opt-in)
+경로 확인 폼 아래에서, **고른 파드 안에서 그 요청을 실제로 보낸다**. 그 파드의 사이드카를 통과하므로 라우팅·인가·mTLS가 실제로 어떻게 동작하는지 확인된다("설정상 이렇게 간다"가 아니라 "정말 이렇게 갔다").
+
+- **응답을 Istio 문맥으로 해석** — `403` + `RBAC: access denied` → AuthorizationPolicy 거부, `503` + `upstream connect error` → mTLS 불일치나 엔드포인트 없음, Envoy 헤더 유무 → 사이드카를 실제로 통과했는지. 업스트림 처리 시간(`x-envoy-upstream-service-time`)도 함께 보여준다.
+- **3중 잠금** — ① 헬름 opt-in(`requestTester.enabled=true`, 기본 꺼짐) ② admin 전용 ③ 셸을 거치지 않는 argv 구성 + 입력 검증(스킴·메서드·헤더 개행) + 타임아웃·응답 크기 상한. 누가 어느 파드에서 어디로 보냈는지 감사 로그에 남는다.
+- **켤 때의 대가** — SA에 `pods` 읽기와 `pods/exec` 권한이 붙는다(사실상 모든 파드에서 명령 실행). 그래서 기본값은 꺼짐이고, 필요할 때만 의식적으로 켜는 구조다. 대상 컨테이너에 `curl`이 없으면(distroless) 그 사실을 안내한다.
+
 ### 역할 인식 UI + 변경 히스토리
 - 로그인 계정의 역할을 미리 확인해, viewer면 폼과 적용/삭제 버튼을 **읽기전용**으로 전환한다. 서버도 같은 규칙으로 모든 변경을 403 처리하므로 UI 우회가 불가능하다.
 - 홈의 **변경 히스토리** 패널에 대시보드를 거친 생성/수정/삭제가 계정명·시각과 함께 남는다(서버 인메모리 최근 200건 — 재시작 시 초기화, 영구 기록은 구조화 감사 로그). 홈 카드에는 istiod 컨트롤플레인 실제 버전(예: `1.30.2`)도 표시된다.
@@ -180,6 +187,7 @@ kubectl -n istio-system edit configmap periplus-accounts
 | `ACCOUNTS_DIR` | `/etc/periplus/accounts` | 계정 ConfigMap 마운트 경로 |
 | `ACCOUNTS_CONFIGMAP` / `POD_NAMESPACE` | (헬름이 주입) | 비밀번호 변경·초기 admin 생성이 patch할 CM 위치 |
 | `SESSION_SECRET` | (없음) | 세션 쿠키 서명 키. 비우면 부팅마다 랜덤(재시작 = 재로그인) |
+| `REQUEST_TESTER` | (헬름이 주입) | `true`면 실제 요청 테스터 활성화 (pods/exec 권한 필요, admin 전용) |
 | `CLUSTERS_SECRET` / `POD_NAMESPACE` | (헬름이 주입) | 멀티클러스터: 원격 클러스터 kubeconfig Secret 이름 (비우면 local만) |
 
 프로브: `/healthz` (live) · `/readyz` (ready) · `/metrics` (Prometheus). 로그는 `slog` JSON 구조화(요청 로그 + 쓰기 감사 로그).
