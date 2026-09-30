@@ -16,12 +16,16 @@ const PATHS: Record<string, string> = {
   list: 'M3.75 12h16.5M3.75 6.75h16.5M3.75 17.25h16.5',
   logout:
     'M15.75 9V5.25A2.25 2.25 0 0013.5 3h-7.5A2.25 2.25 0 003.75 5.25v13.5A2.25 2.25 0 006 21h7.5a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9',
-  network: 'M9 5h6M6 8v8m12-8v8M9 19h6M3 2h6v6H3zM15 2h6v6h-6zM3 16h6v6H3zM15 16h6v6h-6z',
-  route: 'M5 5h5a4 4 0 014 4v6a4 4 0 004 4h1M16 16l3 3-3 3M5 2a3 3 0 110 6 3 3 0 010-6z',
+  network:
+    'M9 5h6M6 8v8m12-8v8M9 19h6M3 2h6v6H3zM15 2h6v6h-6zM3 16h6v6H3zM15 16h6v6h-6z',
+  route:
+    'M5 5h5a4 4 0 014 4v6a4 4 0 004 4h1M16 16l3 3-3 3M5 2a3 3 0 110 6 3 3 0 010-6z',
   settings: 'M4 7h16M4 17h16M9 4v6M15 14v6',
   user: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM4 21v-2a8 8 0 0116 0v2',
   search: 'M21 21l-5-5M18 10a8 8 0 11-16 0 8 8 0 0116 0z',
   plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  fit: 'M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M8 8h8v8H8z',
   chevron: 'M9 5l7 7-7 7',
   down: 'M6 9l6 6 6-6',
   arrow: 'M4 12h16M14 6l6 6-6 6',
@@ -31,7 +35,8 @@ const PATHS: Record<string, string> = {
   clock: 'M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   refresh: 'M20 7V3l-3 3M4 17v4l3-3M20 7a8 8 0 00-14-2M4 17a8 8 0 0014 2',
   terminal: 'M5 7l5 5-5 5M13 17h6M2 3h20v18H2z',
-  globe: 'M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18z',
+  globe:
+    'M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18z',
   lock: 'M7 10V7a5 5 0 0110 0v3M5 10h14v11H5zM12 14v3',
   info: 'M12 11v6M12 7h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
   send: 'M22 2L9 15M22 2l-7 20-6-7-7-6 20-7z',

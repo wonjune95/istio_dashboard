@@ -90,9 +90,13 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 
 - **인그레스** — External → Gateway → Route(호스트) → Service(엔드포인트 수). 존재하지 않는 backend나 엔드포인트 0개 서비스는 빨간 엣지 + 경고 필로 표시되어, 트래픽이 갈 곳 없는 설정을 눈으로 잡는다.
 - **이그레스** — Mesh → egress Gateway → 외부 호스트, 라우트에 안 걸린 ServiceEntry는 메시에서 직접 나가는 경로로 표시. 외부 백엔드에는 커버하는 ServiceEntry가 배지로 붙는다(와일드카드 호스트 매치).
-- **상호작용** — 노드를 클릭하면 그 노드를 지나는 유입/유출 경로만 부각되고 나머지는 흐려진다. 노드는 드래그로 자유 배치, 카드 호버 시 ↗ 아이콘으로 리소스 편집 화면으로 이동.
+- **탐색** — 인그레스·이그레스 전환, 이름/호스트/종류 검색, 네임스페이스 필터와 문제 경로 필터를 제공한다. 필터에 맞는 노드의 상류·하류도 함께 유지해 전체 연결을 확인할 수 있다. 존재하지 않는 게이트웨이 참조도 경고 노드로 표시한다.
+- **상호작용** — 노드를 클릭하거나 키보드로 선택하면 관련 경로가 강조되고, 아래 상세 영역에서 상태·호스트·포트와 리소스 열기 링크를 확인한다. 마우스 드래그, 확대·축소, 화면에 맞춤, 배치 초기화를 지원한다. 모바일에서는 그래프 영역 안에서 가로 스크롤한다.
+- **갱신** — 30초마다 설정을 다시 조회하며 수동 새로고침도 가능하다. 조회 실패에는 오류와 재시도 버튼을 표시한다. 연결선 애니메이션은 실제 트래픽량이나 지연을 나타내지 않는다.
 
-![트래픽 흐름도 — 노드 선택 시 관련 경로 부각](docs/screenshot-flowmap.png)
+![트래픽 흐름도 — 경로 탐색과 선택한 노드 상세](docs/ui-refresh/flow-desktop.png)
+
+[다크 모드](docs/ui-refresh/flow-dark.png) · [모바일](docs/ui-refresh/flow-mobile.png)
 
 ### 요청 콘솔 — 경로 확인 (시뮬레이터)
 Postman처럼 메서드·URL·헤더·본문을 한 화면에서 작성하고, 두 가지로 검증한다. **경로 확인**은 **실제 요청 없이** 어느 룰에 매치되어 어디로 가는지 계산한다. 트래픽이 발생하지 않아 부작용이 없고, 추가 권한도 필요 없다(viewer도 사용 가능).
@@ -233,7 +237,7 @@ istio_dashboard/
 │  ├─ assets/                  # 빌드된 React(dist) embed + SPA fallback
 │  └─ observability/           # slog 로깅, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
-│  └─ tests/                   # 브라우저 회귀 검증 (클러스터 선택 복구)
+│  └─ tests/                   # 브라우저 회귀 검증 (클러스터 선택 복구, 트래픽 흐름)
 ├─ hack/bcrypt-hash.go         # 계정 비밀번호 해시 생성 헬퍼
 ├─ deploy/
 │  ├─ helm/                    # Chart: deployment / service / rbac / values
@@ -259,12 +263,15 @@ cd web && npm run dev              # 프론트 HMR: Vite :5173 → /api 프록�
 go test ./...                      # 단위 테스트 (인증 경계·레지스트리 캐시·쓰기 가드·감사 로그, fake client 기반)
 go vet ./...
 cd web && npm run lint         # ESLint
-cd web && npm run test:cluster-selection   # 브라우저 회귀 검증 (실행 중인 대시보드 필요)
+cd web && npm run test:cluster-selection   # 클러스터 선택 복구 검증
+cd web && npm run test:flow-map            # 흐름 탐색·드래그·반응형 UI 검증
 
 # 컨테이너 없이 단일 바이너리로 구동할 때
 cd web && npm ci && npm run build  # 프론트 빌드 → internal/assets/dist
 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 ```
+
+브라우저 테스트는 실행 중인 프론트엔드와 Playwright Chromium이 필요하며, API 응답을 테스트 데이터로 대체한다. 준비 및 실행 옵션은 [web/tests/README.md](web/tests/README.md)를 참고한다.
 
 ## 권한 모델
 

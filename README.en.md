@@ -90,9 +90,13 @@ Draws the traffic path purely from routing configuration — no metrics dependen
 
 - **Ingress** — External → Gateway → Route (hosts) → Service (endpoint counts). Backends that don't exist or have zero endpoints get red edges + warning pills, so dead-end configs are caught at a glance.
 - **Egress** — Mesh → egress Gateway → external hosts; ServiceEntries not referenced by any route are shown as direct egress paths. External backends get a badge with the ServiceEntry that covers them (wildcard host matching included).
-- **Interaction** — click a node to spotlight only the paths through it, dimming everything else. Drag nodes to rearrange; hover a card and use the ↗ icon to jump to the resource editor.
+- **Navigation** — switch between ingress and egress, search by name/host/kind, filter by namespace or problem paths. Matching nodes retain their upstream and downstream connections. Missing gateway references appear as warning nodes.
+- **Interaction** — select a node with a click or keyboard to highlight its paths. The details panel shows its status, hosts, port and resource link. Mouse drag, zoom, fit and layout reset are available. On mobile, horizontal scrolling stays inside the graph.
+- **Refresh** — configuration refreshes every 30 seconds, with a manual refresh button. Failed queries show an error and retry action. Animated connections do not represent actual traffic volume or latency.
 
-![Traffic flow map — selecting a node highlights its paths](docs/screenshot-flowmap.png)
+![Traffic flow map — path navigation and selected node details](docs/ui-refresh/flow-desktop.png)
+
+[Dark mode](docs/ui-refresh/flow-dark.png) · [Mobile](docs/ui-refresh/flow-mobile.png)
 
 ### Request console — route check (simulator)
 Compose a request Postman-style (method, URL, headers, body) and verify it two ways. **Route check** computes which rule the request matches and where it goes — **without sending any request**. No traffic, no side effects, and no extra permissions (viewers can use it).
@@ -233,7 +237,7 @@ istio_dashboard/
 │  ├─ assets/                  # built React (dist) embed + SPA fallback
 │  └─ observability/           # slog logging, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
-│  └─ tests/                   # browser regression checks (cluster-selection recovery)
+│  └─ tests/                   # browser regression checks (cluster selection and traffic flow)
 ├─ hack/bcrypt-hash.go         # password hash helper
 ├─ deploy/
 │  ├─ helm/                    # chart: deployment / service / rbac / values
@@ -258,12 +262,15 @@ cd web && npm run dev              # frontend HMR: Vite :5173 → /api proxy →
 go test ./...                      # unit tests (auth boundaries, registry cache, write guards, audit, flow map)
 go vet ./...
 cd web && npm run lint         # ESLint
-cd web && npm run test:cluster-selection   # browser regression checks (needs a running dashboard)
+cd web && npm run test:cluster-selection   # cluster selection recovery
+cd web && npm run test:flow-map            # path filtering, drag and responsive UI
 
 # single binary without a container
 cd web && npm ci && npm run build  # frontend build → internal/assets/dist
 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 ```
+
+Browser tests need a running frontend and Playwright Chromium. They replace API responses with fixtures. See [web/tests/README.md](web/tests/README.md) for setup and options.
 
 ## Permission model
 

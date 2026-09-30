@@ -1,520 +1,651 @@
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { useFlowMap } from '../api/flowmap'
 import { PageHeader } from '../components/PageHeader'
 import { EmptyState } from '../components/EmptyState'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
-import {
-  useFlowMap,
-  type FlowBackend,
-  type FlowGateway,
-  type FlowRoute,
-  type FlowServiceEntry,
-} from '../api/flowmap'
 import { Icon } from '../components/icons'
+import {
+  buildTopology,
+  connectedNodes,
+  filterTopology,
+  type FlowNode,
+  type Topology,
+} from './flowTopology'
 
-type Edge = { from: string; to: string; broken?: boolean }
 type Offsets = Record<string, { x: number; y: number }>
-
-// 노드 DOM 위치를 측정해 SVG 베지어 곡선으로 잇는 캔버스. setRef(id)로 노드를
-// 등록하고 edges의 from/to id를 연결한다. offsets(드래그)가 바뀌면 다시 그린다.
-function useFlowCanvas(edges: Edge[], offsets: Offsets) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const nodeRefs = useRef(new Map<string, HTMLElement>())
-  const [paths, setPaths] = useState<
-    { key: string; from: string; to: string; d: string; broken?: boolean }[]
-  >([])
-
-  useLayoutEffect(() => {
-    const draw = () => {
-      const c = containerRef.current
-      if (!c) return
-      const cb = c.getBoundingClientRect()
-      // 드래그로 노드가 아래 경계를 넘으면 캔버스를 그만큼 늘려 배경이 따라오게 한다
-      let maxBottom = 0
-      for (const el of nodeRefs.current.values()) {
-        maxBottom = Math.max(maxBottom, el.getBoundingClientRect().bottom - cb.top)
-      }
-      c.style.minHeight = `${Math.ceil(maxBottom)}px`
-      const seen = new Set<string>()
-      const out: typeof paths = []
-      for (const e of edges) {
-        const key = `${e.from}→${e.to}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        const a = nodeRefs.current.get(e.from)?.getBoundingClientRect()
-        const b = nodeRefs.current.get(e.to)?.getBoundingClientRect()
-        if (!a || !b) continue
-        const x1 = a.right - cb.left
-        const y1 = a.top + a.height / 2 - cb.top
-        const x2 = b.left - cb.left
-        const y2 = b.top + b.height / 2 - cb.top
-        const mx = (x1 + x2) / 2
-        out.push({
-          key,
-          from: e.from,
-          to: e.to,
-          broken: e.broken,
-          d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`,
-        })
-      }
-      setPaths(out)
-    }
-    draw()
-    window.addEventListener('resize', draw)
-    return () => window.removeEventListener('resize', draw)
-  }, [edges, offsets])
-
-  const setRef = (id: string) => (el: HTMLElement | null) => {
-    if (el) nodeRefs.current.set(id, el)
-    else nodeRefs.current.delete(id)
-  }
-  // 드래그 중에만 호출된다 — 렌더 경로에서 ref를 읽지 않는다.
-  const getBounds = useCallback(() => containerRef.current?.getBoundingClientRect(), [])
-  return { containerRef, setRef, paths, getBounds }
-}
-
-// 선택 노드의 상류(유입 경로) + 하류(유출 경로) 집합. 형제 경로는 포함하지 않는다.
-function computeHighlight(selected: string | null, edges: Edge[]) {
-  if (!selected) return null
-  const fwd = new Map<string, string[]>()
-  const rev = new Map<string, string[]>()
-  for (const e of edges) {
-    fwd.set(e.from, [...(fwd.get(e.from) ?? []), e.to])
-    rev.set(e.to, [...(rev.get(e.to) ?? []), e.from])
-  }
-  const nodes = new Set([selected])
-  const walk = (adj: Map<string, string[]>) => {
-    const q = [selected]
-    while (q.length) {
-      for (const n of adj.get(q.pop() as string) ?? []) {
-        if (!nodes.has(n)) {
-          nodes.add(n)
-          q.push(n)
-        }
-      }
-    }
-  }
-  walk(fwd)
-  walk(rev)
-  return nodes
-}
-
-const gwId = (g: FlowGateway) => `${g.namespace}/${g.name}`
-const routeId = (r: FlowRoute) => `r:${r.kind}/${r.namespace}/${r.name}`
-const backendId = (b: FlowBackend) =>
-  b.external ? `b:ext:${b.name}` : `b:${b.namespace}/${b.name}:${b.port ?? 0}`
-const backendBroken = (b: FlowBackend) => !b.external && (!b.exists || b.endpoints === 0)
+const CANVAS_WIDTH = 1064
+const stages = ['요청 출발지', '게이트웨이', '라우트', '목적지']
 
 export function FlowMap() {
-  const { data, isLoading } = useFlowMap()
-
-  const { ingress, egress } = useMemo(() => {
-    const gateways = data?.gateways ?? []
-    const routes = data?.routes ?? []
-    const serviceEntries = data?.serviceEntries ?? []
-    const egressGwIds = new Set(gateways.filter((g) => g.egress).map(gwId))
-    const split = (isEgress: boolean) => {
-      const gws = gateways.filter((g) => !!g.egress === isEgress)
-      const rts = routes.filter((r) => r.gateways.some((g) => egressGwIds.has(g)) === isEgress)
-      const ids = new Set(gws.map(gwId))
-      const backends = new Map<string, FlowBackend>()
-      const edges: Edge[] = gws.map((g) => ({ from: 'src', to: `g:${gwId(g)}` }))
-      for (const r of rts) {
-        for (const g of r.gateways) if (ids.has(g)) edges.push({ from: `g:${g}`, to: routeId(r) })
-        for (const b of r.backends) {
-          if (!backends.has(backendId(b))) backends.set(backendId(b), b)
-          edges.push({ from: routeId(r), to: backendId(b), broken: backendBroken(b) })
-        }
-      }
-      return { gws, rts, backends, edges }
-    }
-    const ing = split(false)
-    const eg = split(true)
-    // 라우트가 참조하지 않는 ServiceEntry는 메시에서 직접 나가는 이그레스로 표시
-    const referenced = new Set(
-      [...eg.backends.values(), ...ing.backends.values()]
-        .filter((b) => b.serviceEntry)
-        .map((b) => b.serviceEntry as string),
-    )
-    const directSEs = serviceEntries.filter((se) => !referenced.has(se.name))
-    for (const se of directSEs) eg.edges.push({ from: 'src', to: `se:${se.namespace}/${se.name}` })
-    return { ingress: ing, egress: { ...eg, directSEs } }
-  }, [data])
-
-  const hasEgress = egress.gws.length > 0 || egress.directSEs.length > 0 || egress.rts.length > 0
+  const { data, isLoading, error, isFetching, refetch, dataUpdatedAt } =
+    useFlowMap()
+  const [direction, setDirection] = useState<'ingress' | 'egress'>('ingress')
+  const [query, setQuery] = useState('')
+  const [namespace, setNamespace] = useState('')
+  const [issuesOnly, setIssuesOnly] = useState(false)
+  const ingress = useMemo(() => buildTopology(data, 'ingress'), [data])
+  const egress = useMemo(() => buildTopology(data, 'egress'), [data])
+  const topology = direction === 'ingress' ? ingress : egress
+  const filtered = useMemo(
+    () => filterTopology(topology, query, namespace, issuesOnly),
+    [topology, query, namespace, issuesOnly],
+  )
+  const namespaces = [
+    ...new Set(
+      [...ingress.nodes, ...egress.nodes].flatMap((n) =>
+        n.namespace ? [n.namespace] : [],
+      ),
+    ),
+  ].sort()
+  const issues = topology.nodes.filter((n) => n.issue).length
+  const resetFilters = () => {
+    setQuery('')
+    setNamespace('')
+    setIssuesOnly(false)
+  }
+  const filteredCount = filtered.nodes.filter((n) => n.stage === 2).length
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Traffic topology"
         title="트래픽 흐름"
-        description="게이트웨이부터 서비스까지 연결된 경로를 확인하세요. 노드를 선택하면 관련 경로가 강조됩니다."
+        description="요청이 어디로 연결되는지, 어떤 경로를 점검해야 하는지 한눈에 확인하세요."
+        actions={
+          <button
+            className="btn-ghost"
+            onClick={() => void refetch()}
+            disabled={isFetching}
+          >
+            <Icon
+              name="refresh"
+              className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`}
+            />{' '}
+            새로고침
+          </button>
+        }
       />
-
-      {isLoading && <p className="text-sm text-muted">불러오는 중…</p>}
-      {!isLoading && ingress.gws.length === 0 && ingress.rts.length === 0 && !hasEgress && (
-        <div className="panel">
+      <div className="flow-summary">
+        {[
+          {
+            label: '게이트웨이',
+            value: topology.nodes.filter((n) => n.stage === 1).length,
+            icon: 'shield',
+            tone: 'blue',
+          },
+          {
+            label: '라우트',
+            value: topology.nodes.filter((n) => n.stage === 2).length,
+            icon: 'route',
+            tone: 'violet',
+          },
+          {
+            label: '목적지',
+            value: topology.nodes.filter((n) => n.stage === 3).length,
+            icon: 'cube',
+            tone: 'green',
+          },
+          {
+            label: '점검할 노드',
+            value: issues,
+            icon: issues ? 'warning' : 'check',
+            tone: issues ? 'red' : 'green',
+          },
+        ].map((stat) => (
+          <div className="panel flex items-center gap-3 p-4" key={stat.label}>
+            <span className={`flow-icon flow-tone-${stat.tone}`}>
+              <Icon name={stat.icon} className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-xs text-muted">{stat.label}</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-strong">
+                {isLoading ? '—' : stat.value}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <section
+        className="panel min-w-0 overflow-hidden"
+        aria-label="트래픽 경로 탐색"
+      >
+        <div className="flow-toolbar">
+          <div className="flow-tabs" aria-label="트래픽 방향">
+            {(['ingress', 'egress'] as const).map((value) => (
+              <button
+                key={value}
+                className={direction === value ? 'is-active' : ''}
+                aria-pressed={direction === value}
+                onClick={() => setDirection(value)}
+              >
+                <Icon
+                  name={value === 'ingress' ? 'download' : 'send'}
+                  className="h-4 w-4"
+                />
+                {value === 'ingress' ? '인그레스' : '이그레스'}
+                <span>
+                  {
+                    (value === 'ingress' ? ingress : egress).nodes.filter(
+                      (n) => n.stage === 2 || n.kind === 'ServiceEntry',
+                    ).length
+                  }
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted">
+            설정 기반 · 30초마다 갱신
+            {dataUpdatedAt > 0 &&
+              ` · ${new Date(dataUpdatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`}
+          </p>
+        </div>
+        <div className="flow-filters">
+          <div className="relative min-w-0 flex-1">
+            <Icon
+              name="search"
+              className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted"
+            />
+            <input
+              className="input-base pl-9"
+              aria-label="흐름 검색"
+              placeholder="이름, 호스트, 리소스 종류 검색"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <select
+            className="input-base flow-namespace"
+            aria-label="흐름 네임스페이스"
+            value={namespace}
+            onChange={(e) => setNamespace(e.target.value)}
+          >
+            <option value="">전체 네임스페이스</option>
+            {namespaces.map((ns) => (
+              <option key={ns}>{ns}</option>
+            ))}
+          </select>
+          <button
+            className={`flow-issue-filter ${issuesOnly ? 'is-active' : ''}`}
+            aria-pressed={issuesOnly}
+            onClick={() => setIssuesOnly(!issuesOnly)}
+          >
+            <Icon name="warning" className="h-4 w-4" /> 문제 경로{' '}
+            <span>{issues}</span>
+          </button>
+          {(query || namespace || issuesOnly) && (
+            <button className="btn-ghost" onClick={resetFilters}>
+              필터 초기화
+            </button>
+          )}
+        </div>
+        {error && (
+          <div
+            className="m-5 flex flex-wrap items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400"
+            role="alert"
+          >
+            <Icon name="warning" />
+            흐름을 불러오지 못했습니다: {error.message}
+            <button className="btn-ghost" onClick={() => void refetch()}>
+              다시 시도
+            </button>
+          </div>
+        )}
+        {isLoading ? (
+          <div className="p-12 text-center text-sm text-muted" role="status">
+            트래픽 경로를 불러오는 중…
+          </div>
+        ) : !data ? null : filtered.nodes.length <= 1 ? (
           <EmptyState
             icon="route"
-            title="아직 연결된 경로가 없습니다"
-            description="게이트웨이와 라우트를 구성하면 트래픽 흐름이 표시됩니다."
+            title={
+              topology.nodes.length <= 1
+                ? `${direction === 'ingress' ? '인그레스' : '이그레스'} 경로가 없습니다`
+                : '일치하는 경로가 없습니다'
+            }
+            description={
+              topology.nodes.length <= 1
+                ? '게이트웨이, 라우트 또는 ServiceEntry를 구성하면 연결 경로가 표시됩니다.'
+                : '다른 검색어나 네임스페이스를 선택해 보세요.'
+            }
+            action={
+              (query || namespace || issuesOnly) && (
+                <button className="btn-ghost" onClick={resetFilters}>
+                  필터 초기화
+                </button>
+              )
+            }
           />
+        ) : (
+          <FlowCanvas key={direction} topology={filtered} />
+        )}
+        <div className="flow-footer">
+          <span>
+            <span className="flow-legend-line" /> 설정 연결
+          </span>
+          <span>
+            <span className="flow-legend-line is-broken" /> 점검 필요
+          </span>
+          <span className="ml-auto">
+            {filteredCount}개 라우트 표시 · 실제 트래픽·지연 지표는 포함하지
+            않습니다
+          </span>
         </div>
-      )}
-
-      {(ingress.gws.length > 0 || ingress.rts.length > 0) && (
-        <FlowSection
-          title="인그레스"
-          srcLabel="External"
-          srcIcon="bolt"
-          gateways={ingress.gws}
-          routes={ingress.rts}
-          backends={ingress.backends}
-          serviceEntries={[]}
-          edges={ingress.edges}
-        />
-      )}
-
-      {hasEgress && (
-        <FlowSection
-          title="이그레스"
-          srcLabel="Mesh"
-          srcIcon="cube"
-          gateways={egress.gws}
-          routes={egress.rts}
-          backends={egress.backends}
-          serviceEntries={egress.directSEs}
-          edges={egress.edges}
-        />
-      )}
+      </section>
     </div>
   )
 }
 
-// 드래그(이동) + 클릭(선택)을 분리하는 래퍼. 3px 이상 움직이면 드래그로 보고
-// 클릭 선택을 무시한다. 카드 안의 링크는 stopPropagation으로 드래그를 피한다.
-// 노드는 캔버스(bounds) 밖으로 못 나간다 — 도트 배경 밖으로 끌려나가면 이상해 보인다.
-function DraggableNode({
-  id,
-  offsets,
-  setOffsets,
-  onSelect,
-  dimmed,
-  nodeRef,
-  getBounds,
-  children,
-  className = '',
-}: {
-  id: string
-  offsets: Offsets
-  setOffsets: React.Dispatch<React.SetStateAction<Offsets>>
-  onSelect: () => void
-  dimmed: boolean
-  nodeRef: (el: HTMLElement | null) => void
-  // 캔버스 경계는 포인터 이벤트 시점에만 읽는다 (렌더 중 ref 접근 금지).
-  getBounds: () => DOMRect | undefined
-  children: ReactNode
-  className?: string
-}) {
-  const drag = useRef<{
-    px: number
-    py: number
-    ox: number
-    oy: number
-    moved: boolean
-    minX: number
-    maxX: number
-    minY: number
-    maxY: number
-  } | null>(null)
-  const o = offsets[id] ?? { x: 0, y: 0 }
-  return (
-    <div
-      ref={nodeRef}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => {
-        const r = e.currentTarget.getBoundingClientRect()
-        const cb = getBounds()
-        // 오프셋 제외한 기준 위치로 캔버스 내 이동 가능 범위를 계산해 둔다
-        const baseL = r.left - o.x
-        const baseT = r.top - o.y
-        drag.current = {
-          px: e.clientX,
-          py: e.clientY,
-          ox: o.x,
-          oy: o.y,
-          moved: false,
-          minX: cb ? cb.left - baseL : -Infinity,
-          maxX: cb ? cb.right - baseL - r.width : Infinity,
-          minY: cb ? cb.top - baseT : -Infinity,
-          maxY: Infinity, // 아래로는 제한 없음 — 캔버스가 따라 늘어난다
-        }
-        e.currentTarget.setPointerCapture(e.pointerId)
-      }}
-      onPointerMove={(e) => {
-        const d = drag.current
-        if (!d) return
-        const dx = e.clientX - d.px
-        const dy = e.clientY - d.py
-        if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true
-        if (d.moved) {
-          const x = Math.min(Math.max(d.ox + dx, d.minX), d.maxX)
-          const y = Math.min(Math.max(d.oy + dy, d.minY), d.maxY)
-          setOffsets((prev) => ({ ...prev, [id]: { x, y } }))
-        }
-      }}
-      onPointerUp={() => {
-        const d = drag.current
-        drag.current = null
-        if (!d?.moved) onSelect()
-      }}
-      style={{ transform: `translate(${o.x}px, ${o.y}px)`, touchAction: 'none' }}
-      className={`cursor-grab select-none transition-opacity active:cursor-grabbing ${dimmed ? 'opacity-25' : ''} ${className}`}
-    >
-      {children}
-    </div>
-  )
-}
-
-// 아이콘 칩 + 제목/메타/배지 노드 카드. to가 있으면 호버 시 ↗ 링크 표시.
-function NodeCard({
-  icon,
-  iconClass,
-  title,
-  meta,
-  badge,
-  to,
-  selected,
-}: {
-  icon: string
-  iconClass: string
-  title: ReactNode
-  meta: ReactNode
-  badge?: ReactNode
-  to?: string
-  selected: boolean
-}) {
-  return (
-    <div className={`flow-node group relative w-64 ${selected ? 'flow-node-selected' : ''}`}>
-      <div className="flex items-start gap-2.5">
-        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
-          <Icon name={icon} className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-strong">{title}</div>
-          <div className="mt-0.5 truncate text-xs text-muted">{meta}</div>
-          {badge && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{badge}</div>}
-        </div>
-      </div>
-      {to && (
-        <Link
-          to={to}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          title="리소스 열기"
-          className="absolute right-2 top-2 rounded-md p-1 text-faint opacity-0 transition hover:bg-accent-soft hover:text-accent group-hover:opacity-100"
-        >
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            className="h-3.5 w-3.5"
-          >
-            <path d="M8 5h7v7M15 5l-8 8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </Link>
-      )}
-    </div>
-  )
-}
-
-function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'muted' | 'accent'; children: ReactNode }) {
-  const cls = {
-    ok: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    warn: 'bg-red-500/10 text-red-600 dark:text-red-400',
-    muted: 'bg-gray-500/10 text-gray-500 dark:text-slate-400',
-    accent: 'bg-accent-soft text-accent',
-  }[tone]
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}
-    >
-      {children}
-    </span>
-  )
-}
-
-function Dot({ tone }: { tone: 'ok' | 'warn' }) {
-  return <span className={`h-1.5 w-1.5 rounded-full ${tone === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-}
-
-function FlowSection({
-  title,
-  srcLabel,
-  srcIcon,
-  gateways,
-  routes,
-  backends,
-  serviceEntries,
-  edges,
-}: {
-  title: string
-  srcLabel: string
-  srcIcon: string
-  gateways: FlowGateway[]
-  routes: FlowRoute[]
-  backends: Map<string, FlowBackend>
-  serviceEntries: FlowServiceEntry[]
-  edges: Edge[]
-}) {
+function FlowCanvas({ topology }: { topology: Topology }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [offsets, setOffsets] = useState<Offsets>({})
-  const { containerRef, setRef, paths, getBounds } = useFlowCanvas(edges, offsets)
-  const highlight = useMemo(() => computeHighlight(selected, edges), [selected, edges])
+  const [zoom, setZoom] = useState<number | null>(null)
+  const [viewportWidth, setViewportWidth] = useState(CANVAS_WIDTH + 48)
+  const [height, setHeight] = useState(340)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const refs = useRef(new Map<string, HTMLButtonElement>())
+  const [paths, setPaths] = useState<
+    { key: string; from: string; to: string; d: string; broken?: boolean }[]
+  >([])
+  const scale =
+    zoom ?? Math.max(0.65, Math.min(1, (viewportWidth - 48) / CANVAS_WIDTH))
+  const fit = () =>
+    setZoom(Math.max(0.25, Math.min(1, (viewportWidth - 48) / CANVAS_WIDTH)))
+  const selectedNode = topology.nodes.find((n) => n.id === selected)
+  const highlight = useMemo(
+    () =>
+      selectedNode ? connectedNodes([selectedNode.id], topology.edges) : null,
+    [selectedNode, topology.edges],
+  )
 
-  const dimmed = (id: string) => !!highlight && !highlight.has(id)
-  const select = (id: string) => () => setSelected((cur) => (cur === id ? null : id))
-  const nodeProps = (id: string) => ({
-    id,
-    offsets,
-    setOffsets,
-    onSelect: select(id),
-    dimmed: dimmed(id),
-    nodeRef: setRef(id),
-    getBounds,
-  })
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const observer = new ResizeObserver(() =>
+      setViewportWidth(viewport.clientWidth),
+    )
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [])
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const draw = () => {
+      const bounds = canvas.getBoundingClientRect()
+      let bottom = 320
+      for (const node of refs.current.values())
+        bottom = Math.max(
+          bottom,
+          (node.getBoundingClientRect().bottom - bounds.top) / scale + 32,
+        )
+      setHeight(bottom)
+      setPaths(
+        topology.edges.flatMap((edge) => {
+          const a = refs.current.get(edge.from)?.getBoundingClientRect()
+          const b = refs.current.get(edge.to)?.getBoundingClientRect()
+          if (!a || !b) return []
+          const x1 = (a.right - bounds.left) / scale,
+            y1 = (a.top + a.height / 2 - bounds.top) / scale
+          const x2 = (b.left - bounds.left) / scale,
+            y2 = (b.top + b.height / 2 - bounds.top) / scale
+          const bend = Math.max(28, (x2 - x1) / 2)
+          return [
+            {
+              ...edge,
+              key: `${edge.from}>${edge.to}`,
+              d: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
+            },
+          ]
+        }),
+      )
+    }
+    draw()
+    const observer = new ResizeObserver(draw)
+    for (const node of refs.current.values()) observer.observe(node)
+    window.addEventListener('resize', draw)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', draw)
+    }
+  }, [topology, offsets, scale])
+
+  const register = useCallback((id: string, el: HTMLButtonElement | null) => {
+    if (el) refs.current.set(id, el)
+    else refs.current.delete(id)
+  }, [])
 
   return (
-    <div className="flow-canvas" onClick={() => setSelected(null)}>
-      <h3 className="mb-4 text-[11px] font-semibold uppercase tracking-widest text-faint">{title}</h3>
-      <div ref={containerRef} className="relative">
-        <svg className="pointer-events-none absolute inset-0 h-full w-full">
-          {paths.map((p) => {
-            const onPath = highlight && highlight.has(p.from) && highlight.has(p.to)
-            return (
-              <path
-                key={p.key}
-                d={p.d}
-                fill="none"
-                strokeWidth={onPath ? 2 : 1.5}
-                strokeLinecap="round"
-                className={`flow-edge transition-opacity ${
-                  p.broken
-                    ? 'stroke-red-400/70'
-                    : onPath
-                      ? 'flow-edge-hi'
-                      : 'stroke-gray-400/50 dark:stroke-slate-500/60'
-                } ${highlight && !onPath ? 'opacity-10' : ''}`}
-              />
-            )
-          })}
-        </svg>
-        <div className="relative flex items-start gap-16">
-          <DraggableNode {...nodeProps('src')} className="w-24 shrink-0 self-start pt-1">
-            <div className="flex flex-col items-center">
-              <span
-                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg"
-                style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}
-              >
-                <Icon name={srcIcon} className="h-6 w-6" />
-              </span>
-              <span className="mt-2 text-xs font-medium text-muted">{srcLabel}</span>
-            </div>
-          </DraggableNode>
-
-          {gateways.length > 0 && (
-            <div className="flex min-w-0 flex-col gap-5">
-              {gateways.map((g) => (
-                <DraggableNode key={gwId(g)} {...nodeProps(`g:${gwId(g)}`)}>
-                  <NodeCard
-                    selected={selected === `g:${gwId(g)}`}
-                    to={`/resources/${g.typeId}/${g.namespace}/${g.name}`}
-                    icon="shield"
-                    iconClass="bg-blue-500/10 text-blue-500"
-                    title={g.name}
-                    meta={`${g.kind === 'IstioGateway' ? 'Istio Gateway' : 'Gateway API'} · ${g.namespace}`}
-                    badge={g.hosts.length > 0 && <Pill tone="accent">{g.hosts.join(', ')}</Pill>}
-                  />
-                </DraggableNode>
+    <>
+      <div className="flow-canvas-controls">
+        <p className="text-xs text-muted">
+          노드를 선택해 경로 확인 · 마우스로 드래그해 배치
+        </p>
+        <div
+          className="flex flex-wrap items-center gap-1"
+          aria-label="흐름도 보기 설정"
+        >
+          <button
+            className="flow-control"
+            aria-label="흐름도 축소"
+            disabled={scale <= 0.25}
+            onClick={() => setZoom(Math.max(0.25, scale - 0.1))}
+          >
+            <Icon name="minus" className="h-4 w-4" />
+          </button>
+          <span
+            className="w-12 text-center text-xs tabular-nums text-muted"
+            aria-live="polite"
+          >
+            {Math.round(scale * 100)}%
+          </span>
+          <button
+            className="flow-control"
+            aria-label="흐름도 확대"
+            disabled={scale >= 1.5}
+            onClick={() => setZoom(Math.min(1.5, scale + 0.1))}
+          >
+            <Icon name="plus" className="h-4 w-4" />
+          </button>
+          <button className="flow-control px-2" onClick={fit}>
+            <Icon name="fit" className="h-4 w-4" /> 화면에 맞춤
+          </button>
+          <button
+            className="flow-control px-2"
+            onClick={() => {
+              setOffsets({})
+              setZoom(null)
+              setSelected(null)
+              viewportRef.current?.scrollTo({ left: 0, top: 0 })
+            }}
+          >
+            <Icon name="refresh" className="h-4 w-4" /> 배치 초기화
+          </button>
+        </div>
+      </div>
+      <div
+        ref={viewportRef}
+        className="flow-viewport"
+        tabIndex={0}
+        aria-label="트래픽 연결 그래프. 가로로 스크롤할 수 있습니다."
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setSelected(null)
+        }}
+        onClick={(e) => {
+          if (!(e.target as HTMLElement).closest('button')) setSelected(null)
+        }}
+      >
+        <div
+          style={{
+            width: CANVAS_WIDTH * scale,
+            height: height * scale,
+            margin: 24,
+          }}
+        >
+          <div
+            ref={canvasRef}
+            className="flow-canvas"
+            style={{
+              width: CANVAS_WIDTH,
+              minHeight: height,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            <svg
+              className="pointer-events-none absolute inset-0 h-full w-full"
+              aria-hidden="true"
+            >
+              {paths.map((path) => {
+                const active =
+                  !!highlight &&
+                  highlight.has(path.from) &&
+                  highlight.has(path.to)
+                return (
+                  <g
+                    key={path.key}
+                    className={highlight && !active ? 'opacity-20' : ''}
+                  >
+                    <path
+                      d={path.d}
+                      className={`flow-edge ${path.broken ? 'is-broken' : active ? 'is-active' : ''}`}
+                      fill="none"
+                    />
+                    <path
+                      d={path.d}
+                      className={`flow-edge-motion ${path.broken ? 'is-broken' : ''}`}
+                      fill="none"
+                    />
+                  </g>
+                )
+              })}
+            </svg>
+            <div className="flow-columns">
+              {stages.map((stage, index) => (
+                <div key={stage} className="min-w-0">
+                  <div className="flow-stage">
+                    <span>{String(index + 1).padStart(2, '0')}</span>
+                    {stage}
+                    <small>
+                      {topology.nodes.filter((n) => n.stage === index).length}
+                    </small>
+                  </div>
+                  <div className="flex flex-col gap-5">
+                    {topology.nodes
+                      .filter((n) => n.stage === index)
+                      .map((node) => (
+                        <DraggableCard
+                          key={node.id}
+                          node={node}
+                          selected={selectedNode?.id === node.id}
+                          dimmed={!!highlight && !highlight.has(node.id)}
+                          offset={offsets[node.id] ?? { x: 0, y: 0 }}
+                          register={register}
+                          scale={scale}
+                          onSelect={() =>
+                            setSelected(selected === node.id ? null : node.id)
+                          }
+                          onMove={(offset) =>
+                            setOffsets((previous) => ({
+                              ...previous,
+                              [node.id]: offset,
+                            }))
+                          }
+                        />
+                      ))}
+                    {!topology.nodes.some((n) => n.stage === index) && (
+                      <div className="flow-stage-empty">
+                        {index === 1 || index === 2
+                          ? '직접 연결 경로'
+                          : '연결된 노드 없음'}
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
-          )}
-
-          {routes.length > 0 && (
-            <div className="flex min-w-0 flex-col gap-5">
-              {routes.map((r) => (
-                <DraggableNode key={routeId(r)} {...nodeProps(routeId(r))}>
-                  <NodeCard
-                    selected={selected === routeId(r)}
-                    to={`/resources/${r.typeId}/${r.namespace}/${r.name}`}
-                    icon="bolt"
-                    iconClass="bg-violet-500/10 text-violet-500"
-                    title={r.hosts.length > 0 ? r.hosts.join(', ') : r.name}
-                    meta={`${r.kind} · ${r.namespace}/${r.name}`}
-                  />
-                </DraggableNode>
-              ))}
-            </div>
-          )}
-
-          <div className="flex min-w-0 flex-col gap-5">
-            {[...backends.entries()].map(([id, b]) => (
-              <DraggableNode key={id} {...nodeProps(id)}>
-                <NodeCard
-                  selected={selected === id}
-                  icon="cube"
-                  iconClass={
-                    b.external
-                      ? 'bg-gray-500/10 text-gray-500 dark:text-slate-400'
-                      : backendBroken(b)
-                        ? 'bg-red-500/10 text-red-500'
-                        : 'bg-emerald-500/10 text-emerald-500'
-                  }
-                  title={
-                    <>
-                      {b.name}
-                      {b.port ? <span className="font-normal text-muted">:{b.port}</span> : null}
-                    </>
-                  }
-                  meta={b.external ? '외부 호스트' : `Service · ${b.namespace}`}
-                  badge={
-                    b.external ? (
-                      b.serviceEntry && <Pill tone="accent">ServiceEntry {b.serviceEntry}</Pill>
-                    ) : !b.exists ? (
-                      <Pill tone="warn">
-                        <Dot tone="warn" /> 서비스 없음
-                      </Pill>
-                    ) : b.endpoints === 0 ? (
-                      <Pill tone="warn">
-                        <Dot tone="warn" /> 엔드포인트 0
-                      </Pill>
-                    ) : (
-                      <Pill tone="ok">
-                        <Dot tone="ok" /> 엔드포인트 {b.endpoints}
-                      </Pill>
-                    )
-                  }
-                />
-              </DraggableNode>
-            ))}
-            {serviceEntries.map((se) => (
-              <DraggableNode
-                key={`${se.namespace}/${se.name}`}
-                {...nodeProps(`se:${se.namespace}/${se.name}`)}
-              >
-                <NodeCard
-                  selected={selected === `se:${se.namespace}/${se.name}`}
-                  to={`/resources/${se.typeId}/${se.namespace}/${se.name}`}
-                  icon="chart"
-                  iconClass="bg-emerald-500/10 text-emerald-500"
-                  title={se.hosts.join(', ') || se.name}
-                  meta={`ServiceEntry · ${se.namespace}/${se.name}`}
-                />
-              </DraggableNode>
-            ))}
           </div>
         </div>
       </div>
+      {selectedNode ? (
+        <NodeDetails
+          node={selectedNode}
+          connected={highlight?.size ?? 1}
+          clear={() => setSelected(null)}
+        />
+      ) : (
+        <div className="flow-selection-hint">
+          <Icon name="info" className="h-4 w-4" /> 노드를 선택하면 관련 경로와
+          리소스 상세 정보가 표시됩니다.
+        </div>
+      )}
+    </>
+  )
+}
+
+function DraggableCard({
+  node,
+  selected,
+  dimmed,
+  offset,
+  register,
+  scale,
+  onSelect,
+  onMove,
+}: {
+  node: FlowNode
+  selected: boolean
+  dimmed: boolean
+  offset: { x: number; y: number }
+  register: (id: string, el: HTMLButtonElement | null) => void
+  scale: number
+  onSelect: () => void
+  onMove: (offset: { x: number; y: number }) => void
+}) {
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const suppressClick = useRef(false)
+  return (
+    <button
+      ref={(el) => register(node.id, el)}
+      type="button"
+      aria-label={`${node.kind} ${node.name}${node.status ? `, ${node.status}` : ''}`}
+      aria-pressed={selected}
+      className={`flow-node flow-tone-${node.tone} ${node.stage === 0 ? 'flow-source' : ''} ${selected ? 'is-selected' : ''} ${dimmed ? 'is-dimmed' : ''}`}
+      style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (!suppressClick.current) onSelect()
+        suppressClick.current = false
+      }}
+      onPointerDown={(e) => {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return
+        suppressClick.current = false
+        drag.current = { x: e.clientX, y: e.clientY, moved: false }
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return
+        const dx = (e.clientX - drag.current.x) / scale,
+          dy = (e.clientY - drag.current.y) / scale
+        if (Math.abs(dx) + Math.abs(dy) > 4) drag.current.moved = true
+        if (drag.current.moved) {
+          const columnStart = [0, 176, 472, 768][node.stage]
+          const x = Math.min(
+            Math.max(offset.x + dx, -columnStart),
+            CANVAS_WIDTH - columnStart - (node.stage === 0 ? 120 : 240),
+          )
+          const y = Math.max(-12, offset.y + dy)
+          onMove({ x, y })
+          drag.current.x = e.clientX
+          drag.current.y = e.clientY
+        }
+      }}
+      onPointerUp={() => {
+        suppressClick.current = !!drag.current?.moved
+        drag.current = null
+      }}
+      onPointerCancel={() => {
+        drag.current = null
+        suppressClick.current = false
+      }}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="flow-icon">
+          <Icon name={node.icon} className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted">
+            {node.kind}
+          </span>
+          <span
+            className="flow-node-name mt-0.5 block truncate text-sm font-semibold text-strong"
+            title={node.name}
+          >
+            {node.name}
+          </span>
+        </span>
+      </div>
+      {node.namespace && (
+        <p className="mt-3 truncate text-[11px] text-muted">
+          {node.namespace}
+          {node.port ? ` · :${node.port}` : ''}
+        </p>
+      )}
+      {node.hosts.length > 0 && (
+        <p className="flow-hosts" title={node.hosts.join(', ')}>
+          {node.hosts.join(', ')}
+        </p>
+      )}
+      {node.status && (
+        <span className={`flow-status ${node.issue ? 'is-issue' : ''}`}>
+          <span />
+          {node.status}
+        </span>
+      )}
+      {selected && <span className="flow-selected-dot" />}
+    </button>
+  )
+}
+
+function NodeDetails({
+  node,
+  connected,
+  clear,
+}: {
+  node: FlowNode
+  connected: number
+  clear: () => void
+}) {
+  return (
+    <div
+      className="flow-details"
+      aria-label="선택한 노드 상세"
+      aria-live="polite"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span className={`flow-icon flow-tone-${node.tone}`}>
+          <Icon name={node.icon} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium text-muted">
+            {node.kind} · 연결 노드 {connected}개
+          </p>
+          <h2 className="mt-1 break-all text-sm font-semibold text-strong">
+            {node.name}
+          </h2>
+        </div>
+        <button
+          className="flow-control ml-auto"
+          aria-label="노드 선택 해제"
+          onClick={clear}
+        >
+          <Icon name="close" className="h-4 w-4" />
+        </button>
+      </div>
+      <dl className="flow-detail-grid">
+        <div>
+          <dt>네임스페이스</dt>
+          <dd>{node.namespace || '—'}</dd>
+        </div>
+        <div>
+          <dt>호스트 / 포트</dt>
+          <dd>
+            {node.hosts.join(', ') || (node.port ? `:${node.port}` : '—')}
+          </dd>
+        </div>
+        <div>
+          <dt>상태</dt>
+          <dd className={node.issue ? 'text-red-600 dark:text-red-400' : ''}>
+            {node.issue || node.status || '라우팅 설정에 포함됨'}
+          </dd>
+        </div>
+      </dl>
+      {node.to && (
+        <Link className="btn-ghost justify-center" to={node.to}>
+          리소스 열기
+          <Icon name="arrow" className="h-4 w-4" />
+        </Link>
+      )}
     </div>
   )
 }

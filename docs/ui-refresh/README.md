@@ -10,7 +10,8 @@
 - [실제 배포의 로그인 화면](deployed-login.png)
 - [리소스 목록](resources-desktop.png) / [편집](editor-desktop.png) / [적용 미리보기](preview-dialog.png)
 - [요청 콘솔](request-desktop.png) / [모바일 요청 콘솔](request-mobile.png)
-- [트래픽 흐름](flow-desktop.png) / [설정](settings-desktop.png)
+- [트래픽 흐름](flow-desktop.png) / [다크 모드](flow-dark.png) / [모바일](flow-mobile.png)
+- [설정](settings-desktop.png)
 
 홈, 목록, 편집, 흐름도와 요청 분석은 로컬 개발 서버를 실제 클러스터에 연결해 검증했습니다. 브라우저 반복 검증은 조회 응답을 캐시했고, 계정 관리 화면에는 샘플 계정 응답을 사용했습니다. 적용 미리보기의 dry-run 응답과 로그인 오류 응답은 테스트용으로 대체했습니다. 브라우저 검증 중 실제 리소스 생성, 수정, 삭제 및 실제 요청 전송은 수행하지 않았습니다.
 
@@ -29,7 +30,7 @@
 
 - 네임스페이스: `istio-dashboard`
 - Helm 릴리스: `istio-dashboard`
-- 이미지: `harbor.114-110-181-178.nip.io/nnd/istio-dashboard:ui-20260930-cluster-fix`
+- 이미지: `harbor.114-110-181-178.nip.io/nnd/istio-dashboard:ui-20260930-flow`
 - 이전 이미지: `harbor.114-110-181-178.nip.io/nnd/istio-dashboard:dev-46` (Helm revision 1)
 - 기존 Helm 값을 유지하고 이미지 태그를 변경했습니다.
 - 배포 주소: http://istio-dashboard.180-210-89-135.nip.io
@@ -43,3 +44,15 @@
 앱 시작 시 등록 목록을 먼저 확인하도록 변경했습니다. 등록되지 않은 선택은 해제하고 local의 개요 화면으로 이동합니다. 원격 편집 경로에서 시작했어도 local 리소스 편집 화면을 자동으로 열지 않습니다. 등록된 클러스터의 연결 오류 및 목록 조회 오류에는 선택을 유지하고 명시적인 복귀 버튼을 제공합니다. 로그인, 계정 관리 및 클러스터 등록 API에는 선택한 원격 클러스터 파라미터를 붙이지 않습니다.
 
 `web/tests/cluster-selection.mjs`에 브라우저 회귀 검증 5개를 추가했습니다. 실행 방법은 `web/tests/README.md`를 참고하세요.
+
+## 트래픽 흐름 화면 개편
+
+인그레스·이그레스 방향 전환, 게이트웨이/라우트/목적지/점검 노드 요약, 이름·호스트·종류 검색, 네임스페이스 및 문제 경로 필터를 추가했습니다. 필터에 맞는 노드의 상류·하류를 함께 유지합니다. 양쪽 방향의 게이트웨이를 참조하는 라우트는 각 방향에 모두 표시하며, 없는 게이트웨이 참조는 경고 노드로 나타냅니다.
+
+노드 선택 시 경로를 강조하고 상태·호스트·포트 및 리소스 이동 링크를 상세 영역에 제공합니다. 마우스 드래그, 확대·축소, 화면에 맞춤, 배치 초기화와 키보드 선택/Escape 해제를 지원합니다. 모바일의 가로 스크롤은 그래프 안에 한정하며, 모션 감소 설정을 반영합니다. 조회 오류와 재시도, 빈 결과를 구분합니다.
+
+흐름 스크린샷은 실제 클러스터의 설정을 조회한 로컬 개발 서버에서 `istio-dashboard` 검색과 노드 선택 후 촬영했습니다. `web/tests/flow-map.mjs`는 테스트 데이터로 검색/필터, 양방향 라우트 및 직접 ServiceEntry, 없는 게이트웨이, 확대 상태 드래그, 키보드 선택, 320~1440px 화면, 모션 감소, 조회 실패와 복구를 검증합니다. 실제 요청이나 Kubernetes 변경은 수행하지 않습니다.
+
+흐름 UI 배포 이전 버전은 `ui-20260930-cluster-fix`(Helm revision 4)입니다. 해당 버전으로 복구하려면 `helm rollback istio-dashboard 4 -n istio-dashboard --wait`를 사용합니다.
+
+새 흐름 UI는 Helm revision 5로 배포했습니다. 배포된 정적 프론트엔드에서도 API 응답을 테스트 데이터로 대체한 흐름 회귀 검증 5개가 통과했고, Pod 1/1 Running 및 healthz 200을 확인했습니다.

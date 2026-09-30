@@ -3,7 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Roboto, Arial, sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Roboto,
+    Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --accent: 37 99 235;
   --accent-hover: 29 78 216;
@@ -316,7 +318,10 @@ button:disabled {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background-image: radial-gradient(rgb(148 163 184 / 0.12) 1px, transparent 1px);
+    background-image: radial-gradient(
+      rgb(148 163 184 / 0.12) 1px,
+      transparent 1px
+    );
     background-size: 24px 24px;
     mask-image: linear-gradient(transparent, black 35%, black 70%, transparent);
   }
@@ -368,46 +373,233 @@ button:disabled {
 }
 
 @layer components {
-  /* ── 트래픽 흐름도 (React Flow 풍) ── */
-  .flow-canvas {
-    @apply rounded-2xl border border-gray-200 p-6;
-    background-color: rgb(249 250 251);
-    background-image: radial-gradient(rgb(0 0 0 / 0.07) 1px, transparent 1px);
-    background-size: 16px 16px;
+  .flow-summary {
+    @apply grid grid-cols-2 gap-3 xl:grid-cols-4;
   }
-  .dark .flow-canvas {
-    @apply border-slate-800;
-    background-color: rgb(2 6 23 / 0.5);
-    background-image: radial-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1px);
+  .flow-toolbar {
+    @apply flex flex-wrap items-center justify-between gap-4 border-b border-base p-5;
+  }
+  .flow-tabs {
+    @apply flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-950;
+  }
+  .flow-tabs button {
+    @apply flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium text-muted;
+  }
+  .flow-tabs button.is-active {
+    @apply bg-white text-accent shadow-sm dark:bg-slate-800;
+  }
+  .flow-tabs button span {
+    @apply rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] tabular-nums;
+  }
+  .flow-filters {
+    @apply flex flex-wrap items-center gap-3 border-b border-base px-5 py-4;
+  }
+  .flow-namespace {
+    width: 200px;
+  }
+  .flow-issue-filter {
+    @apply flex min-h-[38px] items-center gap-2 rounded-lg border border-base px-3 text-xs font-medium text-muted;
+  }
+  .flow-issue-filter.is-active {
+    @apply border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400;
+  }
+  .flow-issue-filter span {
+    @apply rounded bg-slate-500/10 px-1.5 tabular-nums;
+  }
+  .flow-canvas-controls {
+    @apply flex flex-wrap items-center justify-between gap-3 px-5 py-3;
+  }
+  .flow-control {
+    @apply inline-flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-md text-xs text-muted hover:bg-slate-100 disabled:opacity-40 dark:hover:bg-slate-800;
+  }
+  .flow-viewport {
+    @apply relative overflow-auto border-y border-base;
+    max-height: 660px;
+    background-color: rgb(var(--canvas));
+    background-image: radial-gradient(
+      rgb(148 163 184 / 0.3) 1px,
+      transparent 1px
+    );
+    background-size: 20px 20px;
+  }
+  .flow-canvas {
+    @apply relative;
+  }
+  .flow-columns {
+    @apply relative grid items-start;
+    grid-template-columns: 120px repeat(3, 240px);
+    gap: 56px;
+  }
+  .flow-stage {
+    @apply mb-5 flex h-8 items-center gap-2 text-[11px] font-semibold text-muted;
+  }
+  .flow-stage > span {
+    @apply rounded border border-base bg-white px-1.5 py-0.5 text-[10px] text-faint dark:bg-slate-900;
+  }
+  .flow-stage small {
+    @apply ml-auto text-[10px] font-normal tabular-nums text-faint;
+  }
+  .flow-stage-empty {
+    @apply rounded-lg border border-dashed border-base py-5 text-center text-[11px] text-faint;
   }
   .flow-node {
-    @apply block rounded-2xl border border-gray-200 bg-white p-3 shadow-sm transition;
+    @apply relative block w-full select-none rounded-xl border border-base bg-white p-3.5 text-left shadow-sm transition-opacity dark:bg-slate-900;
+    cursor: grab;
   }
-  .dark .flow-node {
-    @apply border-slate-700/70 bg-slate-900;
+  .flow-source > div {
+    flex-direction: column;
+    text-align: center;
   }
-  a.flow-node:hover {
-    @apply -translate-y-0.5 shadow-md;
-    border-color: rgb(var(--accent-ring) / 0.5);
+  .flow-source .flow-node-name {
+    white-space: normal;
+    font-size: 12px;
+  }
+  .flow-node:active {
+    cursor: grabbing;
+  }
+  .flow-node:hover {
+    border-color: rgb(var(--accent-ring));
+    box-shadow: 0 4px 14px rgb(15 23 42 / 0.08);
+  }
+  .flow-node.is-dimmed {
+    opacity: 0.3;
+  }
+  .flow-node.is-selected {
+    border-color: rgb(var(--accent));
+    box-shadow:
+      0 0 0 3px rgb(var(--accent) / 0.13),
+      0 4px 14px rgb(15 23 42 / 0.08);
+  }
+  .flow-icon {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg;
+  }
+  .flow-tone-blue.flow-icon,
+  .flow-tone-blue .flow-icon {
+    @apply bg-blue-500/10 text-blue-600 dark:text-blue-400;
+  }
+  .flow-tone-violet.flow-icon,
+  .flow-tone-violet .flow-icon {
+    @apply bg-violet-500/10 text-violet-600 dark:text-violet-400;
+  }
+  .flow-tone-green.flow-icon,
+  .flow-tone-green .flow-icon {
+    @apply bg-emerald-500/10 text-emerald-600 dark:text-emerald-400;
+  }
+  .flow-tone-red.flow-icon,
+  .flow-tone-red .flow-icon {
+    @apply bg-red-500/10 text-red-600 dark:text-red-400;
+  }
+  .flow-tone-slate.flow-icon,
+  .flow-tone-slate .flow-icon {
+    @apply bg-slate-500/10 text-slate-600 dark:text-slate-400;
+  }
+  .flow-tone-red.flow-node {
+    @apply border-red-500/30;
+  }
+  .flow-hosts {
+    @apply mt-3 truncate rounded-md bg-slate-500/5 px-2 py-1.5 text-[11px] text-muted;
+  }
+  .flow-status {
+    @apply mt-3 inline-flex max-w-full items-center gap-1.5 break-all rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400;
+  }
+  .flow-tone-slate .flow-status {
+    @apply bg-slate-500/10 text-muted;
+  }
+  .flow-status.is-issue {
+    @apply bg-red-500/10 text-red-600 dark:text-red-400;
+  }
+  .flow-status > span {
+    @apply h-1.5 w-1.5 shrink-0 rounded-full bg-current;
+  }
+  .flow-selected-dot {
+    @apply absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-accent dark:border-slate-900;
   }
   .flow-edge {
-    stroke-dasharray: 7 5;
-    animation: flow-dash 0.9s linear infinite;
+    stroke: #94a3b8;
+    stroke-width: 1.5;
+    opacity: 0.6;
   }
-  .flow-edge-hi {
-    stroke: rgb(var(--accent-ring));
+  .flow-edge.is-active {
+    stroke: rgb(var(--accent));
+    stroke-width: 2;
+    opacity: 0.9;
   }
-  .flow-node-selected {
-    border-color: rgb(var(--accent-ring));
-    box-shadow:
-      0 0 0 3px rgb(var(--accent) / 0.15),
-      0 4px 12px rgb(0 0 0 / 0.08);
+  .flow-edge.is-broken {
+    stroke: #ef4444;
+    stroke-dasharray: 5 5;
+    opacity: 0.7;
+  }
+  .flow-edge-motion {
+    stroke: rgb(var(--accent));
+    stroke-width: 2;
+    stroke-dasharray: 3 24;
+    opacity: 0.5;
+    animation: flow-dash 3s linear infinite;
+  }
+  .flow-edge-motion.is-broken {
+    display: none;
+  }
+  .flow-selection-hint {
+    @apply flex items-center gap-2 px-5 py-4 text-xs text-muted;
+  }
+  .flow-details {
+    @apply grid gap-4 border-b border-base bg-slate-50/60 p-5 dark:bg-slate-900/60;
+  }
+  .flow-detail-grid {
+    @apply grid grid-cols-3 gap-5 text-xs;
+  }
+  .flow-detail-grid dt {
+    @apply mb-1.5 text-[11px] text-muted;
+  }
+  .flow-detail-grid dd {
+    @apply break-words font-medium text-strong;
+  }
+  .flow-detail-grid dd.is-issue {
+    @apply text-red-600 dark:text-red-400;
+  }
+  .flow-details > a {
+    @apply w-fit;
+  }
+  .flow-footer {
+    @apply flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 text-[10px] text-muted;
+  }
+  .flow-footer > span {
+    @apply inline-flex items-center gap-1.5;
+  }
+  .flow-legend-line {
+    @apply inline-block w-5 border-t-2 border-slate-400;
+  }
+  .flow-legend-line.is-broken {
+    @apply border-dashed border-red-500;
   }
 }
-
 @keyframes flow-dash {
   to {
-    stroke-dashoffset: -12;
+    stroke-dashoffset: -54;
+  }
+}
+@media (max-width: 640px) {
+  .flow-toolbar,
+  .flow-filters {
+    padding: 16px;
+  }
+  .flow-filters > div {
+    flex-basis: 100%;
+  }
+  .flow-namespace {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+  }
+  .flow-canvas-controls {
+    padding: 12px 16px;
+  }
+  .flow-detail-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .flow-footer .ml-auto {
+    margin-left: 0;
   }
 }
 
@@ -471,6 +663,9 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .flow-edge-motion {
+    animation: none !important;
+  }
   *,
   *::before,
   *::after {
