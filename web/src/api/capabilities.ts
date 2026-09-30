@@ -16,10 +16,11 @@ export interface Capabilities {
   requestTester?: boolean // 실제 요청 테스터 활성화 (헬름 opt-in, admin 전용)
 }
 
-export function useCapabilities() {
+export function useCapabilities(enabled = true) {
   return useQuery({
     queryKey: ['capabilities'],
     queryFn: () => apiGet<Capabilities>('/api/capabilities'),
     staleTime: 5 * 60 * 1000,
+    enabled,
   })
 }

@@ -125,7 +125,12 @@ Postman처럼 메서드·URL·헤더·본문을 한 화면에서 작성하고, �
 - 폼 ↔ YAML 상호 동기화. 폼이 표현 못 하는 고급 필드가 있으면 폼 탭을 잠그고 "YAML 전용"으로 안내 → 필드 유실 방지.
 
 ### UI
-라이트 기본의 고밀도 콘솔(다크 토글 지원). 액센트 색은 CSS 변수 한 곳(`--accent`)에서 관리되어 한 줄 수정으로 리스킨된다. YAML 에디터에는 들여쓰기 가이드라인이 표시되어 인덴트 실수를 눈으로 잡을 수 있다.
+**워크스페이스 탐색** — 사이드바가 현재 클러스터를 항상 보여주고, 그 아래 주요 화면(클러스터 개요·전체 리소스·트래픽 흐름·요청 콘솔)과 설치된 리소스 종류가 카테고리별로 놓인다. 종류가 많아도 **검색 한 줄**로 좁힐 수 있고, 각 종류 옆에 개수가 붙는다.
+
+- **라이트/다크** — 탭 간 테마가 동기화되고 YAML 에디터까지 함께 따라간다. 액센트 색은 CSS 변수 한 곳(`--accent`)에서 관리되어 한 줄로 리스킨된다.
+- **모바일 대응** — 320px까지 가로 스크롤 없이 동작하고, 좁은 화면에서는 탐색이 서랍으로 접힌다.
+- **접근성** — 확인 창은 키보드 포커스를 가두고 Escape로 닫힌다. 고위험 리소스는 이름을 직접 입력해야 진행된다.
+- YAML 에디터에는 들여쓰기 가이드라인이 표시되어 인덴트 실수를 눈으로 잡을 수 있다.
 
 ![리소스 편집 폼](docs/screenshot-form.png)
 
@@ -228,6 +233,7 @@ istio_dashboard/
 │  ├─ assets/                  # 빌드된 React(dist) embed + SPA fallback
 │  └─ observability/           # slog 로깅, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
+│  └─ tests/                   # 브라우저 회귀 검증 (클러스터 선택 복구)
 ├─ hack/bcrypt-hash.go         # 계정 비밀번호 해시 생성 헬퍼
 ├─ deploy/
 │  ├─ helm/                    # Chart: deployment / service / rbac / values
@@ -252,6 +258,8 @@ cd web && npm run dev              # 프론트 HMR: Vite :5173 → /api 프록�
 
 go test ./...                      # 단위 테스트 (인증 경계·레지스트리 캐시·쓰기 가드·감사 로그, fake client 기반)
 go vet ./...
+cd web && npm run lint         # ESLint
+cd web && npm run test:cluster-selection   # 브라우저 회귀 검증 (실행 중인 대시보드 필요)
 
 # 컨테이너 없이 단일 바이너리로 구동할 때
 cd web && npm ci && npm run build  # 프론트 빌드 → internal/assets/dist

@@ -1,3 +1,5 @@
+import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -17,7 +19,9 @@ type Offsets = Record<string, { x: number; y: number }>
 function useFlowCanvas(edges: Edge[], offsets: Offsets) {
   const containerRef = useRef<HTMLDivElement>(null)
   const nodeRefs = useRef(new Map<string, HTMLElement>())
-  const [paths, setPaths] = useState<{ key: string; from: string; to: string; d: string; broken?: boolean }[]>([])
+  const [paths, setPaths] = useState<
+    { key: string; from: string; to: string; d: string; broken?: boolean }[]
+  >([])
 
   useLayoutEffect(() => {
     const draw = () => {
@@ -44,7 +48,13 @@ function useFlowCanvas(edges: Edge[], offsets: Offsets) {
         const x2 = b.left - cb.left
         const y2 = b.top + b.height / 2 - cb.top
         const mx = (x1 + x2) / 2
-        out.push({ key, from: e.from, to: e.to, broken: e.broken, d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}` })
+        out.push({
+          key,
+          from: e.from,
+          to: e.to,
+          broken: e.broken,
+          d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`,
+        })
       }
       setPaths(out)
     }
@@ -76,7 +86,10 @@ function computeHighlight(selected: string | null, edges: Edge[]) {
     const q = [selected]
     while (q.length) {
       for (const n of adj.get(q.pop() as string) ?? []) {
-        if (!nodes.has(n)) { nodes.add(n); q.push(n) }
+        if (!nodes.has(n)) {
+          nodes.add(n)
+          q.push(n)
+        }
       }
     }
   }
@@ -131,16 +144,21 @@ export function FlowMap() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-strong">트래픽 흐름</h2>
-        <p className="mt-1 text-sm text-muted">
-          라우팅 설정으로 본 인그레스/이그레스 경로. 노드를 클릭하면 관련 경로만 부각되고, 드래그로 옮길 수 있다.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Traffic topology"
+        title="트래픽 흐름"
+        description="게이트웨이부터 서비스까지 연결된 경로를 확인하세요. 노드를 선택하면 관련 경로가 강조됩니다."
+      />
 
       {isLoading && <p className="text-sm text-muted">불러오는 중…</p>}
       {!isLoading && ingress.gws.length === 0 && ingress.rts.length === 0 && !hasEgress && (
-        <p className="text-sm text-muted">이 클러스터에는 게이트웨이/라우트 리소스가 없습니다.</p>
+        <div className="panel">
+          <EmptyState
+            icon="route"
+            title="아직 연결된 경로가 없습니다"
+            description="게이트웨이와 라우트를 구성하면 트래픽 흐름이 표시됩니다."
+          />
+        </div>
       )}
 
       {(ingress.gws.length > 0 || ingress.rts.length > 0) && (
@@ -176,7 +194,15 @@ export function FlowMap() {
 // 클릭 선택을 무시한다. 카드 안의 링크는 stopPropagation으로 드래그를 피한다.
 // 노드는 캔버스(bounds) 밖으로 못 나간다 — 도트 배경 밖으로 끌려나가면 이상해 보인다.
 function DraggableNode({
-  id, offsets, setOffsets, onSelect, dimmed, nodeRef, getBounds, children, className = '',
+  id,
+  offsets,
+  setOffsets,
+  onSelect,
+  dimmed,
+  nodeRef,
+  getBounds,
+  children,
+  className = '',
 }: {
   id: string
   offsets: Offsets
@@ -190,8 +216,15 @@ function DraggableNode({
   className?: string
 }) {
   const drag = useRef<{
-    px: number; py: number; ox: number; oy: number; moved: boolean
-    minX: number; maxX: number; minY: number; maxY: number
+    px: number
+    py: number
+    ox: number
+    oy: number
+    moved: boolean
+    minX: number
+    maxX: number
+    minY: number
+    maxY: number
   } | null>(null)
   const o = offsets[id] ?? { x: 0, y: 0 }
   return (
@@ -205,7 +238,11 @@ function DraggableNode({
         const baseL = r.left - o.x
         const baseT = r.top - o.y
         drag.current = {
-          px: e.clientX, py: e.clientY, ox: o.x, oy: o.y, moved: false,
+          px: e.clientX,
+          py: e.clientY,
+          ox: o.x,
+          oy: o.y,
+          moved: false,
           minX: cb ? cb.left - baseL : -Infinity,
           maxX: cb ? cb.right - baseL - r.width : Infinity,
           minY: cb ? cb.top - baseT : -Infinity,
@@ -240,7 +277,13 @@ function DraggableNode({
 
 // 아이콘 칩 + 제목/메타/배지 노드 카드. to가 있으면 호버 시 ↗ 링크 표시.
 function NodeCard({
-  icon, iconClass, title, meta, badge, to, selected,
+  icon,
+  iconClass,
+  title,
+  meta,
+  badge,
+  to,
+  selected,
 }: {
   icon: string
   iconClass: string
@@ -270,7 +313,13 @@ function NodeCard({
           title="리소스 열기"
           className="absolute right-2 top-2 rounded-md p-1 text-faint opacity-0 transition hover:bg-accent-soft hover:text-accent group-hover:opacity-100"
         >
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5">
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            className="h-3.5 w-3.5"
+          >
             <path d="M8 5h7v7M15 5l-8 8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </Link>
@@ -286,7 +335,13 @@ function Pill({ tone, children }: { tone: 'ok' | 'warn' | 'muted' | 'accent'; ch
     muted: 'bg-gray-500/10 text-gray-500 dark:text-slate-400',
     accent: 'bg-accent-soft text-accent',
   }[tone]
-  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}>{children}</span>
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}
+    >
+      {children}
+    </span>
+  )
 }
 
 function Dot({ tone }: { tone: 'ok' | 'warn' }) {
@@ -294,7 +349,14 @@ function Dot({ tone }: { tone: 'ok' | 'warn' }) {
 }
 
 function FlowSection({
-  title, srcLabel, srcIcon, gateways, routes, backends, serviceEntries, edges,
+  title,
+  srcLabel,
+  srcIcon,
+  gateways,
+  routes,
+  backends,
+  serviceEntries,
+  edges,
 }: {
   title: string
   srcLabel: string
@@ -313,7 +375,12 @@ function FlowSection({
   const dimmed = (id: string) => !!highlight && !highlight.has(id)
   const select = (id: string) => () => setSelected((cur) => (cur === id ? null : id))
   const nodeProps = (id: string) => ({
-    id, offsets, setOffsets, onSelect: select(id), dimmed: dimmed(id), nodeRef: setRef(id),
+    id,
+    offsets,
+    setOffsets,
+    onSelect: select(id),
+    dimmed: dimmed(id),
+    nodeRef: setRef(id),
     getBounds,
   })
 
@@ -332,7 +399,11 @@ function FlowSection({
                 strokeWidth={onPath ? 2 : 1.5}
                 strokeLinecap="round"
                 className={`flow-edge transition-opacity ${
-                  p.broken ? 'stroke-red-400/70' : onPath ? 'flow-edge-hi' : 'stroke-gray-400/50 dark:stroke-slate-500/60'
+                  p.broken
+                    ? 'stroke-red-400/70'
+                    : onPath
+                      ? 'flow-edge-hi'
+                      : 'stroke-gray-400/50 dark:stroke-slate-500/60'
                 } ${highlight && !onPath ? 'opacity-10' : ''}`}
               />
             )
@@ -341,7 +412,10 @@ function FlowSection({
         <div className="relative flex items-start gap-16">
           <DraggableNode {...nodeProps('src')} className="w-24 shrink-0 self-start pt-1">
             <div className="flex flex-col items-center">
-              <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg" style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}>
+              <span
+                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-lg"
+                style={{ boxShadow: '0 8px 24px rgb(var(--accent) / 0.35)' }}
+              >
                 <Icon name={srcIcon} className="h-6 w-6" />
               </span>
               <span className="mt-2 text-xs font-medium text-muted">{srcLabel}</span>
@@ -396,24 +470,38 @@ function FlowSection({
                         ? 'bg-red-500/10 text-red-500'
                         : 'bg-emerald-500/10 text-emerald-500'
                   }
-                  title={<>{b.name}{b.port ? <span className="font-normal text-muted">:{b.port}</span> : null}</>}
+                  title={
+                    <>
+                      {b.name}
+                      {b.port ? <span className="font-normal text-muted">:{b.port}</span> : null}
+                    </>
+                  }
                   meta={b.external ? '외부 호스트' : `Service · ${b.namespace}`}
                   badge={
                     b.external ? (
                       b.serviceEntry && <Pill tone="accent">ServiceEntry {b.serviceEntry}</Pill>
                     ) : !b.exists ? (
-                      <Pill tone="warn"><Dot tone="warn" /> 서비스 없음</Pill>
+                      <Pill tone="warn">
+                        <Dot tone="warn" /> 서비스 없음
+                      </Pill>
                     ) : b.endpoints === 0 ? (
-                      <Pill tone="warn"><Dot tone="warn" /> 엔드포인트 0</Pill>
+                      <Pill tone="warn">
+                        <Dot tone="warn" /> 엔드포인트 0
+                      </Pill>
                     ) : (
-                      <Pill tone="ok"><Dot tone="ok" /> 엔드포인트 {b.endpoints}</Pill>
+                      <Pill tone="ok">
+                        <Dot tone="ok" /> 엔드포인트 {b.endpoints}
+                      </Pill>
                     )
                   }
                 />
               </DraggableNode>
             ))}
             {serviceEntries.map((se) => (
-              <DraggableNode key={`${se.namespace}/${se.name}`} {...nodeProps(`se:${se.namespace}/${se.name}`)}>
+              <DraggableNode
+                key={`${se.namespace}/${se.name}`}
+                {...nodeProps(`se:${se.namespace}/${se.name}`)}
+              >
                 <NodeCard
                   selected={selected === `se:${se.namespace}/${se.name}`}
                   to={`/resources/${se.typeId}/${se.namespace}/${se.name}`}

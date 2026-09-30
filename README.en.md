@@ -125,7 +125,12 @@ To try it: `kubectl apply -f deploy/examples/demo-mesh.yaml` brings up sidecar-i
 - Form ↔ YAML stay in sync. If the object uses advanced fields the form can't express, the form tab locks with a "YAML only" notice → no field loss.
 
 ### UI
-A dense, light-first console (dark mode toggle included). The accent color is managed in one CSS variable (`--accent`) — reskin with a one-line change. The YAML editor shows indent guides.
+**Workspace navigation** — the sidebar always shows the current cluster, followed by the main screens (cluster overview, all resources, traffic flow, request console) and the installed resource kinds grouped by category. A **single search box** narrows a long list of kinds, and each one carries its count.
+
+- **Light/dark** — the theme syncs across tabs and carries into the YAML editor. The accent color lives in one CSS variable (`--accent`), so a one-line change reskins the app.
+- **Responsive** — no horizontal scrolling down to 320px; navigation collapses into a drawer on narrow screens.
+- **Accessibility** — confirm dialogs trap keyboard focus and close on Escape. High-risk resources still require typing the name to proceed.
+- The YAML editor shows indent guides so indentation mistakes are visible.
 
 ![Resource edit form](docs/screenshot-form.png)
 
@@ -228,6 +233,7 @@ istio_dashboard/
 │  ├─ assets/                  # built React (dist) embed + SPA fallback
 │  └─ observability/           # slog logging, Prometheus metrics
 ├─ web/                        # React 18 + TS + Vite + Tailwind + rjsf + CodeMirror
+│  └─ tests/                   # browser regression checks (cluster-selection recovery)
 ├─ hack/bcrypt-hash.go         # password hash helper
 ├─ deploy/
 │  ├─ helm/                    # chart: deployment / service / rbac / values
@@ -251,6 +257,8 @@ cd web && npm run dev              # frontend HMR: Vite :5173 → /api proxy →
 
 go test ./...                      # unit tests (auth boundaries, registry cache, write guards, audit, flow map)
 go vet ./...
+cd web && npm run lint         # ESLint
+cd web && npm run test:cluster-selection   # browser regression checks (needs a running dashboard)
 
 # single binary without a container
 cd web && npm ci && npm run build  # frontend build → internal/assets/dist

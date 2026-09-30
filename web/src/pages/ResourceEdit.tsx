@@ -16,6 +16,8 @@ import { FORMS } from '../forms/registry'
 import { AutoForm } from '../forms/AutoForm'
 import { useToast } from '../components/Toast'
 import { KindBadge } from '../components/KindBadge'
+import { PageHeader } from '../components/PageHeader'
+import { Icon } from '../components/icons'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -142,7 +144,9 @@ export function ResourceEdit() {
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<{ action: string; name: string; run: () => void } | null>(null)
   const [preview, setPreview] = useState<{ oldYaml: string; newYaml: string } | null>(null)
-  const [conflict, setConflict] = useState<{ mineYaml: string; latestYaml: string; latestRV: string } | null>(null)
+  const [conflict, setConflict] = useState<{ mineYaml: string; latestYaml: string; latestRV: string } | null>(
+    null,
+  )
 
   /* eslint-disable react-hooks/set-state-in-effect --
      one-time editor init: text/tab can only be seeded after the resource query
@@ -157,7 +161,9 @@ export function ResourceEdit() {
     if (curated) {
       try {
         if (curated.isRepresentable(yamlLoad(initial))) setTab('form')
-      } catch { /* stay yaml */ }
+      } catch {
+        /* stay yaml */
+      }
     } else if (hasAuto) {
       setTab('form')
     }
@@ -167,7 +173,11 @@ export function ResourceEdit() {
   let obj: any = null
   let parseErr: string | null = null
   if (text !== null) {
-    try { obj = yamlLoad(text) } catch (e) { parseErr = (e as Error).message }
+    try {
+      obj = yamlLoad(text)
+    } catch (e) {
+      parseErr = (e as Error).message
+    }
   }
   // Curated form requires a representable object; auto-form handles any spec.
   const formAvailable = !parseErr && !!obj && (curated ? curated.isRepresentable(obj) : hasAuto)
@@ -177,7 +187,13 @@ export function ResourceEdit() {
 
   // Permission-aware UI: SSAR for the verbs this page can perform. When the user
   // lacks the verb, the form/buttons go read-only instead of failing on apply.
-  const access = useAccess(type, isEdit ? ns : formNs, isEdit ? name : '', isEdit ? 'update,delete' : 'create', !!rt)
+  const access = useAccess(
+    type,
+    isEdit ? ns : formNs,
+    isEdit ? name : '',
+    isEdit ? 'update,delete' : 'create',
+    !!rt,
+  )
   const readOnly = isEdit && access.data?.update === false
   const noDelete = isEdit && access.data?.delete === false
   const noCreate = !isEdit && access.data?.create === false
@@ -188,9 +204,14 @@ export function ResourceEdit() {
 
   function switchTab(t: Tab) {
     if (t === 'form' && !formAvailable) {
-      toast('info', parseErr ? 'YAML 파싱 오류로 폼 전환 불가'
-        : !curated && !hasAuto ? `${rt?.kind ?? type} 폼은 없습니다 — YAML로 편집하세요`
-          : '폼이 표현할 수 없는 고급 필드가 있어 YAML 전용입니다')
+      toast(
+        'info',
+        parseErr
+          ? 'YAML 파싱 오류로 폼 전환 불가'
+          : !curated && !hasAuto
+            ? `${rt?.kind ?? type} 폼은 없습니다 — YAML로 편집하세요`
+            : '폼이 표현할 수 없는 고급 필드가 있어 YAML 전용입니다',
+      )
       return
     }
     setTab(t)
@@ -205,9 +226,20 @@ export function ResourceEdit() {
   // 폼/YAML 공통 적용 경로의 사전 검증: 파싱 + 이름/네임스페이스 필수.
   function parseBody(): any | null {
     let body: any
-    try { body = yamlLoad(text ?? '') } catch (e) { toast('error', `YAML 파싱 오류: ${(e as Error).message}`); return null }
-    if (!body?.metadata?.name) { toast('error', '이름(metadata.name)은 필수입니다.'); return null }
-    if (rt?.namespaced && !body.metadata.namespace) { toast('error', '네임스페이스(metadata.namespace)는 필수입니다.'); return null }
+    try {
+      body = yamlLoad(text ?? '')
+    } catch (e) {
+      toast('error', `YAML 파싱 오류: ${(e as Error).message}`)
+      return null
+    }
+    if (!body?.metadata?.name) {
+      toast('error', '이름(metadata.name)은 필수입니다.')
+      return null
+    }
+    if (rt?.namespaced && !body.metadata.namespace) {
+      toast('error', '네임스페이스(metadata.namespace)는 필수입니다.')
+      return null
+    }
     return body
   }
 
@@ -238,10 +270,14 @@ export function ResourceEdit() {
             latestRV: latest.resourceVersion,
           })
           return
-        } catch { /* fall through to generic error */ }
+        } catch {
+          /* fall through to generic error */
+        }
       }
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   // Re-apply my edits on top of the latest serverside version (last-write-wins
@@ -259,11 +295,16 @@ export function ResourceEdit() {
       navigate(`/resources/${type}`)
     } catch (e) {
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   function apply(dryRun: boolean) {
-    if (dryRun) { void doApply(true); return } // "검증" button: validate only
+    if (dryRun) {
+      void doApply(true)
+      return
+    } // "검증" button: validate only
     void openPreview() // "적용" button: dry-run → diff preview → confirm
   }
 
@@ -284,7 +325,9 @@ export function ResourceEdit() {
       })
     } catch (e) {
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function doDelete() {
@@ -297,30 +340,52 @@ export function ResourceEdit() {
       navigate(`/resources/${type}`)
     } catch (e) {
       toast('error', e instanceof ApiError ? `${e.status} ${e.reason}: ${e.message}` : String(e))
-    } finally { setBusy(false) }
+    } finally {
+      setBusy(false)
+    }
   }
 
   function del() {
-    if (rt?.dangerous) { guard('삭제', name, () => void doDelete()); return }
+    if (rt?.dangerous) {
+      guard('삭제', name, () => void doDelete())
+      return
+    }
     if (window.confirm(`${rt?.kind ?? type} ${ns}/${name} 를 삭제할까요?`)) void doDelete()
   }
 
   if (!rt && types.isLoading) return <div className="text-muted">로딩 중…</div>
   if (!rt) return <div className="text-red-600 dark:text-red-400">알 수 없는 리소스 타입: {type}</div>
   if (isEdit && resource.isLoading) return <div className="text-muted">로딩 중…</div>
-  if (isEdit && resource.isError) return <div className="text-red-600 dark:text-red-400">불러오기 실패: {(resource.error as Error).message}</div>
+  if (isEdit && resource.isError)
+    return (
+      <div className="text-red-600 dark:text-red-400">불러오기 실패: {(resource.error as Error).message}</div>
+    )
   if (text === null) return <div className="text-muted">준비 중…</div>
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex items-center gap-2">
-        <KindBadge kind={rt.kind} category={rt.category} />
-        <h2 className="text-lg font-semibold text-strong">
-          {isEdit ? `${rt.kind} 수정 · ${ns}/${name}` : `새 ${rt.kind}`}
-        </h2>
-        {rt.dangerous && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">⚠ 고위험</span>}
-        <Link to={`/resources/${type}`} className="ml-auto text-sm text-muted hover:underline">← 목록</Link>
-      </div>
+    <div className="resource-editor mx-auto space-y-5">
+      <PageHeader
+        eyebrow={isEdit ? 'Resource editor' : 'New resource'}
+        title={isEdit ? name : `새 ${rt.kind}`}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <KindBadge kind={rt.kind} category={rt.category} />
+            {isEdit ? ns : '설정을 작성하고 변경사항을 검증한 후 적용하세요.'}
+            {rt.dangerous && (
+              <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                <Icon name="warning" className="h-3.5 w-3.5" />
+                고위험
+              </span>
+            )}
+          </span>
+        }
+        actions={
+          <Link to={`/resources/${type}`} className="btn-ghost">
+            <Icon name="back" className="h-4 w-4" />
+            목록으로
+          </Link>
+        }
+      />
 
       {readOnly && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
@@ -334,14 +399,25 @@ export function ResourceEdit() {
       )}
 
       <div className="flex items-center gap-1 border-b border-base">
-        <TabButton active={shownTab === 'form'} disabled={!formAvailable || readOnly} onClick={() => switchTab('form')}>폼</TabButton>
-        <TabButton active={shownTab === 'yaml'} onClick={() => switchTab('yaml')}>YAML</TabButton>
+        <TabButton
+          active={shownTab === 'form'}
+          disabled={!formAvailable || readOnly}
+          onClick={() => switchTab('form')}
+        >
+          폼
+        </TabButton>
+        <TabButton active={shownTab === 'yaml'} onClick={() => switchTab('yaml')}>
+          YAML
+        </TabButton>
         {curated && !formAvailable && !parseErr && (
-          <span className="ml-3 self-center text-xs text-amber-600 dark:text-amber-400">고급 필드 감지 — YAML 전용</span>
+          <span className="ml-3 self-center text-xs text-amber-600 dark:text-amber-400">
+            고급 필드 감지 — YAML 전용
+          </span>
         )}
         {shownTab === 'form' && formAvailable && (
           <span className="ml-auto self-center pb-1 text-xs text-faint">
-            <span className="text-red-500">*</span> 필수 · <span className="text-amber-600 dark:text-amber-400">(권장)</span> 채우면 좋음 · (선택) 부가
+            <span className="text-red-500">*</span> 필수 ·{' '}
+            <span className="text-amber-600 dark:text-amber-400">(권장)</span> 채우면 좋음 · (선택) 부가
           </span>
         )}
       </div>
@@ -362,24 +438,32 @@ export function ResourceEdit() {
           onChange={(newSpec: any) => setText(yamlDump({ ...obj, spec: newSpec }))}
           header={
             // 자동 폼은 spec만 렌더하므로 이름/네임스페이스는 여기서 받는다 (필수).
-            <div className="mb-5 grid grid-cols-2 gap-4 border-b border-base pb-5">
+            <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 gap-4 border-b border-base pb-5">
               <label className="block">
-                <span className="mb-1 block text-xs font-medium text-muted">Name<span className="text-red-500">*</span></span>
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  Name<span className="text-red-500">*</span>
+                </span>
                 <input
                   className="input-base disabled:bg-gray-100 dark:disabled:bg-slate-800"
                   value={obj?.metadata?.name ?? ''}
                   disabled={isEdit}
-                  onChange={(e) => setText(yamlDump({ ...obj, metadata: { ...obj?.metadata, name: e.target.value } }))}
+                  onChange={(e) =>
+                    setText(yamlDump({ ...obj, metadata: { ...obj?.metadata, name: e.target.value } }))
+                  }
                 />
               </label>
               {rt.namespaced && (
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-muted">Namespace<span className="text-red-500">*</span></span>
+                  <span className="mb-1 block text-xs font-medium text-muted">
+                    Namespace<span className="text-red-500">*</span>
+                  </span>
                   <input
                     className="input-base disabled:bg-gray-100 dark:disabled:bg-slate-800"
                     value={obj?.metadata?.namespace ?? ''}
                     disabled={isEdit}
-                    onChange={(e) => setText(yamlDump({ ...obj, metadata: { ...obj?.metadata, namespace: e.target.value } }))}
+                    onChange={(e) =>
+                      setText(yamlDump({ ...obj, metadata: { ...obj?.metadata, namespace: e.target.value } }))
+                    }
                   />
                 </label>
               )}
@@ -390,11 +474,32 @@ export function ResourceEdit() {
         <YamlEditor value={text} onChange={setText} readOnly={readOnly} />
       )}
 
-      <div className="panel-soft sticky bottom-0 z-10 -mb-6 mt-4 flex items-center gap-2 border-t border-base py-3 backdrop-blur">
-        <button onClick={() => apply(true)} disabled={busy || cantApply} className="btn-ghost text-sm disabled:opacity-50">검증 (dry-run)</button>
-        <button onClick={() => apply(false)} disabled={busy || cantApply} className="btn-primary text-sm disabled:opacity-50">적용</button>
+      <div className="panel sticky bottom-0 z-10 mt-4 flex flex-wrap items-center gap-2 px-4 py-3 shadow-lg">
+        <button
+          onClick={() => apply(true)}
+          disabled={busy || cantApply}
+          className="btn-ghost text-sm disabled:opacity-50"
+        >
+          <Icon name="check" className="h-4 w-4" />
+          검증
+        </button>
+        <button
+          onClick={() => apply(false)}
+          disabled={busy || cantApply}
+          className="btn-primary text-sm disabled:opacity-50"
+        >
+          <Icon name="plus" className="h-4 w-4" />
+          변경사항 적용
+        </button>
         {isEdit && (
-          <button onClick={del} disabled={busy || noDelete} title={noDelete ? '삭제 권한이 없습니다' : undefined} className="ml-auto rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10">삭제</button>
+          <button
+            onClick={del}
+            disabled={busy || noDelete}
+            title={noDelete ? '삭제 권한이 없습니다' : undefined}
+            className="ml-auto rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10"
+          >
+            삭제
+          </button>
         )}
       </div>
 
@@ -402,7 +507,11 @@ export function ResourceEdit() {
         <DangerConfirm
           name={pending.name}
           action={pending.action}
-          onConfirm={() => { const run = pending.run; setPending(null); run() }}
+          onConfirm={() => {
+            const run = pending.run
+            setPending(null)
+            run()
+          }}
           onCancel={() => setPending(null)}
         />
       )}
@@ -414,7 +523,10 @@ export function ResourceEdit() {
           name={obj?.metadata?.name ?? name}
           dangerous={!!rt.dangerous}
           busy={busy}
-          onConfirm={() => { setPreview(null); void doApply(false) }}
+          onConfirm={() => {
+            setPreview(null)
+            void doApply(false)
+          }}
           onCancel={() => setPreview(null)}
         />
       )}
@@ -430,7 +542,11 @@ export function ResourceEdit() {
           name={obj?.metadata?.name ?? name}
           dangerous={false}
           busy={busy}
-          onConfirm={() => { const rv = conflict.latestRV; setConflict(null); void forceOverwrite(rv) }}
+          onConfirm={() => {
+            const rv = conflict.latestRV
+            setConflict(null)
+            void forceOverwrite(rv)
+          }}
           onCancel={() => setConflict(null)}
         />
       )}
@@ -438,10 +554,23 @@ export function ResourceEdit() {
   )
 }
 
-function TabButton({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabButton({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
   return (
-    <button onClick={onClick} disabled={disabled}
-      className={`-mb-px border-b-2 px-4 py-2 text-sm ${active ? 'border-accent font-medium text-accent' : 'border-transparent text-muted hover:text-strong'} disabled:cursor-not-allowed disabled:opacity-40`}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`-mb-px border-b-2 px-4 py-2 text-sm ${active ? 'border-accent font-medium text-accent' : 'border-transparent text-muted hover:text-strong'} disabled:cursor-not-allowed disabled:opacity-40`}
+    >
       {children}
     </button>
   )

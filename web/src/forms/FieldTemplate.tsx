@@ -20,15 +20,28 @@ export function FieldTemplate(props: FieldTemplateProps) {
   // containers stay full-width so nested content isn't cramped.
   const twoCol = showLabel && !isArray
 
-  if (isArrayItem) return <div className="min-w-0">{children}{errors}</div>
+  if (isArrayItem)
+    return (
+      <div className="min-w-0">
+        {children}
+        {errors}
+      </div>
+    )
 
   const labelEl = showLabel && (
     <label htmlFor={id} className="flex items-center gap-1 text-sm font-medium text-strong">
       {label}
       {required ? (
-        <span className="text-red-500" title="필수">*</span>
+        <span className="text-red-500" title="필수">
+          *
+        </span>
       ) : recommended ? (
-        <span className="text-[10px] font-normal text-amber-600 dark:text-amber-400" title="API상 선택이지만 채우기를 권장">(권장)</span>
+        <span
+          className="text-[10px] font-normal text-amber-600 dark:text-amber-400"
+          title="API상 선택이지만 채우기를 권장"
+        >
+          (권장)
+        </span>
       ) : (
         <span className="text-[10px] font-normal text-faint">(선택)</span>
       )}
@@ -37,12 +50,12 @@ export function FieldTemplate(props: FieldTemplateProps) {
 
   if (twoCol) {
     return (
-      <div className="mb-3 flex flex-row items-start gap-4">
-        <div className="w-1/3 min-w-0 pt-1.5">
+      <div className="mb-4 flex flex-col sm:flex-row items-start gap-2 sm:gap-4">
+        <div className="w-full sm:w-1/3 min-w-0 pt-1.5">
           {labelEl}
           {help && <div className="mt-0.5 text-xs text-faint">{help}</div>}
         </div>
-        <div className="w-2/3 min-w-0">
+        <div className="w-full sm:w-2/3 min-w-0">
           {children}
           {errors}
         </div>

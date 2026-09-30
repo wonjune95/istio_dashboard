@@ -29,10 +29,11 @@ export function YamlEditor({
 }) {
   const { theme } = useTheme()
   return (
-    <div className="overflow-hidden rounded border border-base">
+    <div className="panel overflow-hidden rounded-xl">
       <CodeMirror
         value={value}
-        height="440px"
+        height="480px"
+        style={{ fontSize: 13 }}
         theme={theme === 'dark' ? 'dark' : 'light'}
         extensions={[yaml(), ...whitespaceExtensions]}
         editable={!readOnly}

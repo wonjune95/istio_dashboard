@@ -1,76 +1,157 @@
-import { useEffect, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { useCapabilities } from '../api/capabilities'
 import { useClusters } from '../api/clusters'
+import { useResourceTypes } from '../api/resourceTypes'
 import { apiPost, getCluster, setCluster } from '../api/client'
 import { useTheme } from '../ui/theme'
 import { Icon } from './icons'
 import { Sidebar } from './Sidebar'
 
+const PAGE_NAMES: Record<string, string> = {
+  '/': '클러스터 개요',
+  '/overview': '전체 리소스',
+  '/flowmap': '트래픽 흐름',
+  '/routecheck': '요청 콘솔',
+  '/settings': '설정',
+  '/guard': '시작하기',
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   const { data } = useCapabilities()
   const clusters = useClusters().data
+  const types = useResourceTypes().data
   const { theme, toggle } = useTheme()
+  const location = useLocation()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const drawer = useRef<HTMLDialogElement>(null)
+  const menuButton = useRef<HTMLButtonElement>(null)
+  const resource = types?.find((t) => location.pathname.split('/')[2] === t.typeId)
+  const page = PAGE_NAMES[location.pathname] ?? resource?.kind ?? '리소스'
 
-  // 선택된 클러스터가 목록에서 사라졌으면(삭제됨) local로 복귀 — 400 루프 방지.
   useEffect(() => {
-    if (clusters && getCluster() && !clusters.some((c) => c.name === getCluster())) setCluster('')
-  }, [clusters])
+    if (menuOpen) drawer.current?.showModal()
+    else drawer.current?.close()
+  }, [menuOpen])
+  useEffect(() => {
+    document.title = `${page} · Istio Dashboard`
+  }, [page])
+
+  function closeMenu() {
+    setMenuOpen(false)
+    menuButton.current?.focus()
+  }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex h-14 items-center gap-3 border-b border-base bg-white/80 px-4 backdrop-blur-md dark:bg-slate-950/80">
-        <Link to="/" className="flex items-center gap-2.5 rounded-md py-0.5 hover:opacity-80" title="홈으로">
-          <img src="/favicon.svg" alt="" className="h-7 w-7" />
-          <h1 className="text-base font-semibold tracking-tight text-strong">Istio Dashboard</h1>
+    <div className="app-shell">
+      <a
+        href="#main-content"
+        className="sr-only z-50 rounded-lg bg-white p-3 text-accent focus:not-sr-only focus:absolute focus:left-3 focus:top-3"
+      >
+        본문으로 건너뛰기
+      </a>
+      <header className="app-header">
+        <button
+          ref={menuButton}
+          className="icon-button ml-2 md:hidden"
+          aria-label="탐색 메뉴 열기"
+          aria-expanded={menuOpen}
+          aria-controls="mobile-navigation"
+          onClick={() => setMenuOpen(true)}
+        >
+          <Icon name="list" />
+        </button>
+        <Link to="/" className="app-brand" aria-label="Istio Dashboard 홈">
+          <img src="/favicon.svg" alt="" className="h-8 w-8 shrink-0" />
+          <span className="text-[15px] font-semibold tracking-tight text-strong">Istio Dashboard</span>
         </Link>
-
-        {/* no global namespace selector — Overview/ResourceList carry their own
-            (they share the same persisted state, so the header one was redundant) */}
-        <div className="ml-auto flex items-center gap-2 text-xs">
-          {clusters && clusters.length > 1 && (
+        <div className="hidden min-w-0 items-center gap-2.5 px-6 text-xs md:flex">
+          <Icon name="globe" className="h-4 w-4 text-faint" />
+          <span className="text-muted">Workspace</span>
+          <Icon name="chevron" className="h-3 w-3 text-faint" />
+          <span className="truncate font-medium text-strong">{page}</span>
+        </div>
+        <div className="ml-auto flex items-center gap-1.5 pr-3 md:gap-3 md:pr-6">
+          <label className="hidden items-center gap-2 rounded-lg border border-base px-2.5 py-1.5 text-xs sm:flex">
+            <Icon name="network" className="h-4 w-4 text-muted" />
+            <span className="sr-only">클러스터 선택</span>
             <select
               value={getCluster() || 'local'}
               onChange={(e) => setCluster(e.target.value)}
-              title="클러스터"
-              className="input-base !w-auto !py-1"
+              className="max-w-36 bg-transparent font-medium text-strong focus:outline-none"
             >
-              {clusters.map((c) => (
-                <option key={c.name} value={c.name}>{c.name}</option>
+              {(clusters?.length ? clusters : [{ name: 'local' }]).map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name}
+                </option>
               ))}
             </select>
-          )}
-          {data?.devMode ? (
-            <span className="chip bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">dev mode</span>
-          ) : (
-            <>
-              {data?.user && (
-                <Link to="/settings" title="설정" className="chip bg-gray-100 text-gray-600 hover:opacity-80 dark:bg-slate-800 dark:text-slate-300">
-                  {data.user}
-                </Link>
-              )}
-              <button
-                onClick={() => { void apiPost('/api/logout', {}).finally(() => window.location.reload()) }}
-                title="로그아웃"
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-base text-muted hover:text-strong"
-              >
-                <Icon name="logout" className="h-4 w-4" />
-              </button>
-            </>
+          </label>
+          {data?.devMode && (
+            <span className="chip hidden bg-amber-50 text-amber-700 sm:inline-flex dark:bg-amber-500/10 dark:text-amber-300">
+              개발 모드
+            </span>
           )}
           <button
             onClick={toggle}
+            aria-label={theme === 'dark' ? '라이트 모드' : '다크 모드'}
             title={theme === 'dark' ? '라이트 모드' : '다크 모드'}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-base text-muted hover:text-strong"
+            className="icon-button"
           >
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-4 w-4" />
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-[18px] w-[18px]" />
           </button>
+          {!data?.devMode && data?.user && (
+            <Link
+              to="/settings"
+              className="flex items-center gap-2.5 rounded-lg p-1 hover:bg-slate-50 dark:hover:bg-slate-800"
+              title="내 계정 설정"
+              aria-label={`${data.user} 계정 설정`}
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-blue-100 bg-blue-50 text-xs font-semibold text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/15 dark:text-blue-300">
+                {data.user.slice(0, 2).toUpperCase()}
+              </span>
+              <span className="hidden text-xs leading-4 lg:block">
+                <span className="block font-medium text-strong">{data.user}</span>
+                <span className="text-[10px] capitalize text-muted">{data.role}</span>
+              </span>
+            </Link>
+          )}
+          {!data?.devMode && (
+            <button
+              onClick={() => {
+                void apiPost('/api/logout', {}).finally(() => window.location.reload())
+              }}
+              aria-label="로그아웃"
+              title="로그아웃"
+              className="icon-button hidden sm:inline-flex"
+            >
+              <Icon name="logout" className="h-[18px] w-[18px]" />
+            </button>
+          )}
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <div className="hidden shrink-0 md:block">
+          <Sidebar />
+        </div>
+        <main id="main-content" tabIndex={-1} className="app-main">
+          {children}
+        </main>
       </div>
+      <dialog
+        ref={drawer}
+        id="mobile-navigation"
+        className="mobile-drawer"
+        aria-label="탐색 메뉴"
+        onCancel={closeMenu}
+        onClose={() => setMenuOpen(false)}
+        onClick={(e) => {
+          if (e.target === e.currentTarget && e.clientX > e.currentTarget.getBoundingClientRect().right)
+            closeMenu()
+        }}
+      >
+        <Sidebar onNavigate={closeMenu} onClose={closeMenu} />
+      </dialog>
     </div>
   )
 }

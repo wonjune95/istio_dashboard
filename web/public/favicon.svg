@@ -1,17 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Istio Dashboard 마크: 수로 안내지(해도) — 옅은 해도지 위 해안선·등심선과
-       앱 액센트 블루의 항로 레그 + 웨이포인트. -->
-  <defs>
-    <clipPath id="sq"><rect width="64" height="64" rx="15"/></clipPath>
-  </defs>
-  <rect width="64" height="64" rx="15" fill="#eef5fd" stroke="#d4e2f4" stroke-width="1.5"/>
-  <g clip-path="url(#sq)">
-    <path d="M-6 30 C14 30 26 42 24 66 L-6 66 Z" fill="#d9e7f7"/>
-    <path d="M-6 30 C14 30 26 42 24 66" fill="none" stroke="#5b8ccc" stroke-width="2.5"/>
-    <path d="M-6 42 C8 42 17 52 15 66" fill="none" stroke="#a8c4e6" stroke-width="2"/>
-  </g>
-  <path d="M28 18 L42 27 L54 12" fill="none" stroke="#2563eb" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="28" cy="18" r="3.4" fill="#2563eb"/>
-  <circle cx="42" cy="27" r="3.4" fill="#ffffff" stroke="#2563eb" stroke-width="2.4"/>
-  <circle cx="54" cy="12" r="4" fill="#2563eb"/>
+  <rect width="64" height="64" rx="17" fill="#2563eb"/>
+  <path d="M18 19v26h28V19M18 19l28 26M18 19h28" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="19" r="5" fill="#fff"/>
+  <circle cx="46" cy="19" r="5" fill="#93c5fd"/>
+  <circle cx="18" cy="45" r="5" fill="#93c5fd"/>
+  <circle cx="46" cy="45" r="5" fill="#fff"/>
 </svg>

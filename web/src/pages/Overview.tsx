@@ -8,9 +8,13 @@ import { useNamespaces } from '../api/namespaces'
 import { useNamespace } from '../ui/namespace'
 import { KindBadge } from '../components/KindBadge'
 import { CATEGORY_ORDER, accentFor } from '../ui/categories'
+import { Icon } from '../components/icons'
+import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
 
 export function Overview() {
   const { ns, setNs } = useNamespace()
+  const [search, setSearch] = useState('')
   const [cat, setCat] = useState<Category | ''>('')
   const namespaces = useNamespaces()
   const types = useResourceTypes()
@@ -25,28 +29,63 @@ export function Overview() {
   })
 
   const loading = results.some((r) => r.isLoading)
-  const rows = results.flatMap((r) => r.data ?? [])
+  const rows = results
+    .flatMap((r) => r.data ?? [])
+    .filter((r) =>
+      `${r.kind} ${r.name} ${r.namespace} ${r.summary}`.toLowerCase().includes(search.toLowerCase()),
+    )
+  const failed = results.some((r) => r.isError) || types.isError
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
-      <div className="flex items-center gap-3">
-        <h2 className="text-xl font-semibold text-strong">전체 보기</h2>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-muted dark:bg-slate-800">{rows.length}개</span>
-        {loading && <span className="text-xs text-faint">불러오는 중…</span>}
-      </div>
-
+      <PageHeader
+        eyebrow="Resource inventory"
+        title={
+          <>
+            전체 리소스<span className="nav-count !text-xs">{rows.length}</span>
+          </>
+        }
+        description="클러스터의 모든 메시 설정을 검색하고 네임스페이스별로 살펴보세요."
+      />
+      {failed && (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          일부 리소스를 불러오지 못했습니다.
+        </p>
+      )}
       {/* toolbar */}
-      <div className="panel flex flex-wrap items-center gap-2 rounded-lg p-2.5 text-sm">
+      <div className="panel flex flex-wrap items-center gap-3 p-3 text-sm">
+        <label className="relative min-w-0 flex-1 sm:max-w-xs">
+          <Icon name="search" className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-faint" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="리소스 검색"
+            aria-label="리소스 검색"
+            className="input-base pl-9"
+          />
+        </label>
         <Field label="Namespace">
           <select className="input-base w-auto py-1" value={ns} onChange={(e) => setNs(e.target.value)}>
             <option value="">전체</option>
-            {(namespaces.data ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
+            {(namespaces.data ?? []).map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="Category">
-          <select className="input-base w-auto py-1" value={cat} onChange={(e) => setCat(e.target.value as Category | '')}>
+          <select
+            className="input-base w-auto py-1"
+            value={cat}
+            onChange={(e) => setCat(e.target.value as Category | '')}
+          >
             <option value="">전체</option>
-            {CATEGORY_ORDER.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+            {CATEGORY_ORDER.map((c) => (
+              <option key={c} value={c}>
+                {CATEGORY_LABELS[c]}
+              </option>
+            ))}
           </select>
         </Field>
       </div>
@@ -65,28 +104,55 @@ export function Overview() {
               }`}
             >
               {t.kind} <span className="font-semibold">{n}</span>
-              {t.dangerous && <span className="text-amber-500">⚠</span>}
+              {t.dangerous && <Icon name="warning" className="h-3 w-3 text-amber-500" />}
             </Link>
           )
         })}
       </div>
 
       {/* table */}
-      <div className="panel overflow-hidden rounded-lg">
-        <table className="w-full text-sm">
+      <div className="panel table-scroll">
+        <table className="data-table">
           <thead className="border-b border-base bg-slate-50 text-left text-xs uppercase tracking-wide text-muted dark:bg-slate-800/50">
-            <tr><Th>Kind</Th><Th>Namespace</Th><Th>Name</Th><Th>Summary</Th><Th>Age</Th></tr>
+            <tr>
+              <Th>Kind</Th>
+              <Th>Namespace</Th>
+              <Th>Name</Th>
+              <Th>Summary</Th>
+              <Th>Age</Th>
+            </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-10 text-center text-faint">리소스가 없습니다.</td></tr>
+            {!loading && !failed && rows.length === 0 && (
+              <tr>
+                <td colSpan={5}>
+                  <EmptyState
+                    title={search ? '검색 결과가 없습니다' : '리소스가 없습니다'}
+                    description="검색어나 네임스페이스 필터를 확인하세요."
+                  />
+                </td>
+              </tr>
+            )}
+            {loading && (
+              <tr>
+                <td colSpan={5} className="text-center text-muted">
+                  리소스를 불러오는 중…
+                </td>
+              </tr>
             )}
             {rows.map((r) => (
               <tr key={`${r.typeId}/${r.namespace}/${r.name}`} className="row-hover">
-                <Td><KindBadge kind={r.kind} category={catByType.get(r.typeId)} /></Td>
+                <Td>
+                  <KindBadge kind={r.kind} category={catByType.get(r.typeId)} />
+                </Td>
                 <Td className="text-muted">{r.namespace || '—'}</Td>
                 <Td>
-                  <Link to={`/resources/${r.typeId}/${r.namespace || '-'}/${r.name}`} className="font-medium text-accent hover:underline">{r.name}</Link>
+                  <Link
+                    to={`/resources/${r.typeId}/${r.namespace || '-'}/${r.name}`}
+                    className="font-medium text-accent hover:underline"
+                  >
+                    {r.name}
+                  </Link>
                 </Td>
                 <Td className="text-muted">{r.summary || '—'}</Td>
                 <Td className="text-faint">{r.age}</Td>

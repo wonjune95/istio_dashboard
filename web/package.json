@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:cluster-selection": "node tests/cluster-selection.mjs"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.3",

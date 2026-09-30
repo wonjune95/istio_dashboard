@@ -13,12 +13,15 @@ export class ApiError extends Error {
 // 전환은 전체 리로드 — react-query 캐시가 클러스터별 키 없이 통째로 리셋된다.
 const CLUSTER_KEY = 'istio-dash-cluster'
 export const getCluster = () => localStorage.getItem(CLUSTER_KEY) ?? ''
-export function setCluster(name: string) {
+export function setCluster(name: string, redirectTo?: string) {
   if (name && name !== 'local') localStorage.setItem(CLUSTER_KEY, name)
   else localStorage.removeItem(CLUSTER_KEY)
-  window.location.reload()
+  if (redirectTo) window.location.assign(redirectTo)
+  else window.location.reload()
 }
 function withClusterParam(path: string) {
+  // Accounts and cluster registrations belong to the dashboard's host cluster.
+  if (/^\/api\/(?:clusters|accounts|account|login|logout)(?:\/|\?|$)/.test(path)) return path
   const c = getCluster()
   if (!c) return path
   return path + (path.includes('?') ? '&' : '?') + 'cluster=' + encodeURIComponent(c)
