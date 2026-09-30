@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"sync"
 
-	"periplus/internal/auth"
-	"periplus/internal/k8s"
+	"istio-dashboard/internal/auth"
+	"istio-dashboard/internal/k8s"
 )
 
 // ClientSource is the k8s.ClientFactory surface the handlers depend on,

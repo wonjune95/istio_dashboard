@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"periplus/internal/k8s"
+	"istio-dashboard/internal/k8s"
 )
 
 const maxBodyBytes = 1 << 20 // 1 MiB; route objects are small.

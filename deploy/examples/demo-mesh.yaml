@@ -4,11 +4,11 @@
 #   curl 파드 ──(사이드카)──> echo 서비스 ──> echo-v1 | echo-v2
 #
 # 기본은 v1, 헤더 x-user: beta 를 붙이면 v2로 간다.
-# 정리: kubectl delete namespace periplus-demo
+# 정리: kubectl delete namespace istio-dashboard-demo
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: periplus-demo
+  name: istio-dashboard-demo
   labels:
     istio-injection: enabled
 ---
@@ -16,7 +16,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: echo
-  namespace: periplus-demo
+  namespace: istio-dashboard-demo
 spec:
   selector:
     app: echo
@@ -30,7 +30,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: echo-v1
-  namespace: periplus-demo
+  namespace: istio-dashboard-demo
 spec:
   replicas: 1
   selector:
@@ -49,7 +49,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: echo-v2
-  namespace: periplus-demo
+  namespace: istio-dashboard-demo
 spec:
   replicas: 1
   selector:
@@ -69,7 +69,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: curl
-  namespace: periplus-demo
+  namespace: istio-dashboard-demo
 spec:
   replicas: 1
   selector:
@@ -87,9 +87,9 @@ apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
   name: echo
-  namespace: periplus-demo
+  namespace: istio-dashboard-demo
 spec:
-  host: echo.periplus-demo.svc.cluster.local
+  host: echo.istio-dashboard-demo.svc.cluster.local
   subsets:
     - name: v1
       labels: {version: v1}
@@ -101,10 +101,10 @@ apiVersion: networking.istio.io/v1
 kind: VirtualService
 metadata:
   name: echo
-  namespace: periplus-demo
+  namespace: istio-dashboard-demo
 spec:
   hosts:
-    - echo.periplus-demo.svc.cluster.local
+    - echo.istio-dashboard-demo.svc.cluster.local
   gateways:
     - mesh
   http:
@@ -115,10 +115,10 @@ spec:
               exact: beta
       route:
         - destination:
-            host: echo.periplus-demo.svc.cluster.local
+            host: echo.istio-dashboard-demo.svc.cluster.local
             subset: v2
     # 기본 경로
     - route:
         - destination:
-            host: echo.periplus-demo.svc.cluster.local
+            host: echo.istio-dashboard-demo.svc.cluster.local
             subset: v1

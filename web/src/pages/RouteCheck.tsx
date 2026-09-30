@@ -305,7 +305,7 @@ function SourcePicker({
         {isAdmin ? (
           <>
             <p className="text-xs text-muted">헬름 값으로 켭니다 — ServiceAccount에 <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">pods/exec</code> 권한이 붙습니다(모든 파드에서 명령 실행 가능).</p>
-            <pre className="panel-soft overflow-x-auto rounded-lg p-3 text-xs">helm upgrade periplus deploy/helm -n periplus \
+            <pre className="panel-soft overflow-x-auto rounded-lg p-3 text-xs">helm upgrade istio-dashboard deploy/helm -n istio-dashboard \
   --reuse-values --set requestTester.enabled=true</pre>
           </>
         ) : (

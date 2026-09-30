@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Periplus 마크: 수로 안내지(해도) — 옅은 해도지 위 해안선·등심선과
+  <!-- Istio Dashboard 마크: 수로 안내지(해도) — 옅은 해도지 위 해안선·등심선과
        앱 액센트 블루의 항로 레그 + 웨이포인트. -->
   <defs>
     <clipPath id="sq"><rect width="64" height="64" rx="15"/></clipPath>

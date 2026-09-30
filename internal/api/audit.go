@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"periplus/internal/k8s"
+	"istio-dashboard/internal/k8s"
 )
 
 // AuditEntry is one non-dry-run mutation performed through the dashboard.

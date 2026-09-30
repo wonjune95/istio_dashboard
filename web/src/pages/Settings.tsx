@@ -71,7 +71,7 @@ export function Settings() {
       ) : (
         <p className="text-xs text-muted">
           계정 추가/삭제·역할 변경은 관리자가 설정 페이지 또는{' '}
-          <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">periplus-accounts</code> ConfigMap으로 관리합니다.
+          <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">istio-dashboard-accounts</code> ConfigMap으로 관리합니다.
         </p>
       )}
     </div>

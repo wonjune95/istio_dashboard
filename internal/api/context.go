@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 
-	"periplus/internal/auth"
-	"periplus/internal/k8s"
+	"istio-dashboard/internal/auth"
+	"istio-dashboard/internal/k8s"
 )
 
 // Per-request values injected by withK8s so handlers never touch auth/client

@@ -1,4 +1,4 @@
-# Periplus
+# Istio Routing Dashboard
 
 **한국어** | [English](README.en.md)
 
@@ -9,9 +9,9 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 > [!NOTE]
-> Periplus는 Istio용 서드파티 도구입니다. Istio 및 CNCF의 공식 프로젝트가 아니며 제휴·보증 관계가 없습니다.
+> Istio용 서드파티 도구입니다. Istio 및 CNCF의 공식 프로젝트가 아니며 제휴·보증 관계가 없습니다.
 
-> **Periplus**(페리플러스) — 고대 그리스의 항해 안내서에서 이름을 딴, Istio · Gateway API 라우팅/보안/텔레메트리 설정을 **계정·역할 기반으로 안전하게** 보고·만들고·고치는 단일 바이너리 웹 콘솔.
+> Istio · Gateway API 라우팅/보안/텔레메트리 설정을 **계정·역할 기반으로 안전하게** 보고·만들고·고치는 단일 바이너리 웹 콘솔.
 
 ![대시보드 홈 화면](docs/screenshot.png)
 
@@ -55,12 +55,12 @@ sequenceDiagram
     Dash-->>User: JSON 응답 (viewer면 UI도 읽기전용)
 ```
 
-- **로컬 계정 = ConfigMap** — `periplus-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 파드가 아니라 클러스터(etcd)에 저장되므로 **파드 재시작·재배포에도 계정은 유지**되고, 헬름이 이 CM을 관리하지 않아 upgrade에도 살아남는다. 변경은 마운트 동기화로 **재시작 없이 1분 내 반영**된다.
+- **로컬 계정 = ConfigMap** — `istio-dashboard-accounts` ConfigMap의 키 하나가 계정 하나(`사용자명: "역할:bcrypt해시"`). 파드가 아니라 클러스터(etcd)에 저장되므로 **파드 재시작·재배포에도 계정은 유지**되고, 헬름이 이 CM을 관리하지 않아 upgrade에도 살아남는다. 변경은 마운트 동기화로 **재시작 없이 1분 내 반영**된다.
 - **계정 관리 UI** — admin은 설정 페이지에서 계정 추가·역할/비밀번호 변경·삭제를 할 수 있다(`GET/PUT/DELETE /api/accounts`, 서버가 CM을 patch). 잠금 방지를 위해 본인 삭제·본인 역할 변경·`admin` 계정 삭제는 차단. 물론 `kubectl edit`으로도 가능하다.
 - **초기 admin 자동 생성 + 변경 강제** — 부팅 시 admin 계정이 없으면 `admin`/`admin`으로 만든다. 초기 비밀번호 그대로 로그인하면 **비밀번호 변경 화면에 고정**되어 바꾸기 전까지 아무것도 할 수 없다.
 - **역할 3종** — `viewer`(조회만) · `editor`(변경 가능) · `admin`. 서버가 모든 변경 요청을 역할로 게이트하고(403), UI도 같은 정보로 버튼을 비활성화한다.
 - **본인 비밀번호 변경** — 헤더의 사용자 칩 → 설정 페이지에서 현재 비밀번호 확인 후 변경(viewer 포함). 서버가 CM의 본인 키만 patch한다.
-- **멀티클러스터** — 원격 클러스터 kubeconfig는 `periplus-clusters` Secret에 저장(키 = 클러스터명). 등록/삭제는 admin 전용 UI(`PUT/DELETE /api/clusters/{name}`, 등록 시 연결 테스트), 설정 페이지 목록에 각 클러스터의 **연결 상태·버전**이 표시된다. 모든 API는 `?cluster=` 파라미터로 대상을 고른다(기본 `local`). CRD 카탈로그·스키마 캐시는 클러스터별로 분리되어 설치된 CRD가 달라도 안전하다.
+- **멀티클러스터** — 원격 클러스터 kubeconfig는 `istio-dashboard-clusters` Secret에 저장(키 = 클러스터명). 등록/삭제는 admin 전용 UI(`PUT/DELETE /api/clusters/{name}`, 등록 시 연결 테스트), 설정 페이지 목록에 각 클러스터의 **연결 상태·버전**이 표시된다. 모든 API는 `?cluster=` 파라미터로 대상을 고른다(기본 `local`). CRD 카탈로그·스키마 캐시는 클러스터별로 분리되어 설치된 CRD가 달라도 안전하다.
 - **세션은 서명 쿠키** — 서버 저장소가 없어 무상태 HA 그대로. `SESSION_SECRET` 미설정 시 부팅마다 랜덤 키(재시작 = 재로그인).
 - **하드닝** — CSP(`default-src 'self'`) 등 보안 헤더, HttpOnly 쿠키, distroless non-root, readOnlyRootFilesystem.
 - **에어갭** — 프론트 번들을 바이너리에 인라인. 런타임 외부 의존 0.
@@ -110,7 +110,7 @@ Postman처럼 메서드·URL·헤더·본문을 한 화면에서 작성하고, �
 - **3중 잠금** — ① 헬름 opt-in(`requestTester.enabled=true`, 기본 꺼짐) ② admin 전용 ③ 셸을 거치지 않는 argv 구성 + 입력 검증(스킴·메서드·헤더 개행) + 타임아웃·응답 크기 상한. 누가 어느 파드에서 어디로 보냈는지 감사 로그에 남는다.
 - **켤 때의 대가** — SA에 `pods` 읽기와 `pods/exec` 권한이 붙는다(사실상 모든 파드에서 명령 실행). 그래서 기본값은 꺼짐이고, 필요할 때만 의식적으로 켜는 구조다. 대상 컨테이너에 `curl`이 없으면(distroless) 그 사실을 안내한다.
 
-직접 해보려면 `kubectl apply -f deploy/examples/demo-mesh.yaml` — 사이드카가 주입된 `echo` v1/v2와 curl 클라이언트가 뜨고, 헤더 `x-user: beta`로 카나리가 갈리는 걸 두 방식으로 대조해 볼 수 있다 (정리는 `kubectl delete namespace periplus-demo`).
+직접 해보려면 `kubectl apply -f deploy/examples/demo-mesh.yaml` — 사이드카가 주입된 `echo` v1/v2와 curl 클라이언트가 뜨고, 헤더 `x-user: beta`로 카나리가 갈리는 걸 두 방식으로 대조해 볼 수 있다 (정리는 `kubectl delete namespace istio-dashboard-demo`).
 
 ![요청 콘솔 — 파드 안에서 보낸 실제 요청의 응답](docs/screenshot-requesttest.png)
 
@@ -139,18 +139,18 @@ Postman처럼 메서드·URL·헤더·본문을 한 화면에서 작성하고, �
 릴리스 태그(`v*`)마다 GitHub Actions가 이미지를 발행한다 — 빌드 없이 바로 쓸 수 있다:
 ```bash
 # 프리빌트 이미지 (권장)
-ghcr.io/wonjune95/periplus:latest
+ghcr.io/wonjune95/istio-dashboard:latest
 ```
 직접 빌드하려면 (멀티스테이지라 Go/Node 로컬 설치 불필요):
 ```bash
-docker build -t <registry>/periplus:<tag> .
-docker push <registry>/periplus:<tag>
+docker build -t <registry>/istio-dashboard:<tag> .
+docker push <registry>/istio-dashboard:<tag>
 ```
 
 ### 2) Helm 설치
 ```bash
-helm install periplus ./deploy/helm -n istio-system \
-  --set image.repository=<registry>/periplus --set image.tag=<tag>
+helm install istio-dashboard ./deploy/helm -n istio-system \
+  --set image.repository=<registry>/istio-dashboard --set image.tag=<tag>
 ```
 주요 values: `image.*`, `imagePullSecrets`(사설 레지스트리), `replicaCount`(무상태라 늘리면 그대로 HA), `accountsConfigMap`(계정 ConfigMap), `clustersSecret`(멀티클러스터), `requestTester.enabled`(실제 요청 테스터 — 기본 꺼짐, 켜면 `pods/exec` 권한이 붙는다). 파드는 distroless non-root(uid 65532) + readOnlyRootFilesystem으로 뜬다.
 
@@ -170,13 +170,13 @@ admin으로 로그인하면 **설정 페이지의 계정 관리**에서 계정 �
 ```bash
 go run ./hack/bcrypt-hash.go '비밀번호'                      # bcrypt 해시 생성
 # (Go가 없으면) htpasswd -bnBC 10 "" '비밀번호' | tr -d ':\n'
-kubectl -n istio-system edit configmap periplus-accounts
+kubectl -n istio-system edit configmap istio-dashboard-accounts
 # data에 추가:  사용자명: "역할:해시"   (역할: admin | editor | viewer)
 ```
 재시작 불필요 — 마운트 동기화로 1분 내 반영된다. 예시는 `deploy/examples/accounts-configmap.yaml` 참고.
 
 ### 6) 멀티클러스터 등록 (선택)
-한 대시보드로 여러 클러스터를 관리하려면, admin으로 **설정 페이지 → 클러스터 관리**에서 이름과 대상 클러스터의 kubeconfig를 붙여넣는다. 등록 즉시 연결 테스트가 실행되고, 성공하면 헤더 드롭다운에서 클러스터를 전환할 수 있다. 대상 클러스터에는 아무것도 설치하지 않으며, 자격증명은 대시보드가 있는 클러스터의 `periplus-clusters` Secret에만 저장된다.
+한 대시보드로 여러 클러스터를 관리하려면, admin으로 **설정 페이지 → 클러스터 관리**에서 이름과 대상 클러스터의 kubeconfig를 붙여넣는다. 등록 즉시 연결 테스트가 실행되고, 성공하면 헤더 드롭다운에서 클러스터를 전환할 수 있다. 대상 클러스터에는 아무것도 설치하지 않으며, 자격증명은 대시보드가 있는 클러스터의 `istio-dashboard-clusters` Secret에만 저장된다.
 
 ![설정 페이지 — 계정·클러스터 관리](docs/screenshot-settings.png)
 
@@ -189,7 +189,7 @@ kubectl -n istio-system edit configmap periplus-accounts
 | `--addr` | `:8080` | 리슨 주소 |
 | `--dev` | `false` | 로그인 생략 + 로컬 kubeconfig 사용 (**인클러스터 감지 시 부팅 거부**) |
 | `--kubeconfig` | (기본 로딩 규칙) | dev 전용 kubeconfig 경로 |
-| `ACCOUNTS_DIR` | `/etc/periplus/accounts` | 계정 ConfigMap 마운트 경로 |
+| `ACCOUNTS_DIR` | `/etc/istio-dashboard/accounts` | 계정 ConfigMap 마운트 경로 |
 | `ACCOUNTS_CONFIGMAP` / `POD_NAMESPACE` | (헬름이 주입) | 비밀번호 변경·초기 admin 생성이 patch할 CM 위치 |
 | `SESSION_SECRET` | (없음) | 세션 쿠키 서명 키. 비우면 부팅마다 랜덤(재시작 = 재로그인) |
 | `REQUEST_TESTER` | (헬름이 주입) | `true`면 실제 요청 테스터 활성화 (pods/exec 권한 필요, admin 전용) |
@@ -218,7 +218,7 @@ kubectl -n istio-system edit configmap periplus-accounts
 ## 프로젝트 구조
 
 ```
-periplus/
+istio_dashboard/
 ├─ cmd/server/main.go          # 엔트리포인트: ServeMux, 프로브/metrics, graceful shutdown
 ├─ internal/
 │  ├─ api/                     # JSON 핸들러 (resources CRUD, login/계정/클러스터, capabilities,
@@ -267,7 +267,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 | 클러스터 (K8s RBAC) | 파드 ServiceAccount | 관리 대상 CRD(`*.networking.istio.io`, `security/telemetry.istio.io`, `*.gateway.networking.k8s.io`) CRUD + namespaces/services/endpoints 읽기 + 계정 CM·클러스터 Secret patch. 헬름이 자동 구성. |
 | 사용자 (앱 역할) | 계정 ConfigMap | `admin` = 변경 + 계정·클러스터 관리, `editor` = 변경 가능, `viewer` = 조회만. 서버가 모든 변경 요청을 역할로 게이트(403). |
 
-계정 관리는 admin이 설정 페이지의 **계정 관리 UI**에서 하거나(추가·역할/비밀번호 변경·삭제), `periplus-accounts` ConfigMap을 직접 편집해도 된다(키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제). 본인 비밀번호는 각자 설정 페이지에서 변경한다.
+계정 관리는 admin이 설정 페이지의 **계정 관리 UI**에서 하거나(추가·역할/비밀번호 변경·삭제), `istio-dashboard-accounts` ConfigMap을 직접 편집해도 된다(키 추가 = 계정 추가, 값의 역할 문자열 수정 = 역할 변경, 키 삭제 = 계정 삭제). 본인 비밀번호는 각자 설정 페이지에서 변경한다.
 
 ## 부록 — K8s 설치 한 번에 하기
 
@@ -275,15 +275,15 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 
 ```bash
 # 설치 (네임스페이스는 원하는 곳으로; 이미지 기본값이 ghcr 프리빌트라 --set 불필요)
-helm install periplus oci://ghcr.io/wonjune95/charts/periplus \
-  --version 0.5.0 -n istio-system
+helm install istio-dashboard oci://ghcr.io/wonjune95/charts/istio-dashboard \
+  --version 0.6.0 -n istio-system
 
 # 노출 전 바로 접속해보기
-kubectl -n istio-system port-forward svc/periplus 8080:8080
+kubectl -n istio-system port-forward svc/istio-dashboard 8080:8080
 # → http://localhost:8080  (초기 계정 admin / admin — 첫 로그인 때 비밀번호 변경이 강제된다)
 ```
 
-소스에서 설치하려면 `git clone` 후 `helm install periplus ./deploy/helm -n istio-system` (이미지 빌드는 빠른 시작 1단계 참고).
+소스에서 설치하려면 `git clone` 후 `helm install istio-dashboard ./deploy/helm -n istio-system` (이미지 빌드는 빠른 시작 1단계 참고).
 
 정식 노출은 클러스터 환경에 맞게 하나를 고른다:
 
@@ -291,10 +291,10 @@ kubectl -n istio-system port-forward svc/periplus 8080:8080
 # Gateway API가 있으면 — parentRefs·hostname 수정 후
 kubectl apply -f deploy/examples/httproute.yaml
 
-# Ingress 컨트롤러만 있으면 — 백엔드 서비스 periplus:8080 으로 Ingress 생성
+# Ingress 컨트롤러만 있으면 — 백엔드 서비스 istio-dashboard:8080 으로 Ingress 생성
 ```
 
-설치 후 할 일: ① admin 비밀번호 변경(설정 페이지) ② 계정 추가(설정 → 계정 관리) ③ 멀티클러스터가 필요하면 설정 → 클러스터 관리에서 kubeconfig 등록. 제거는 `helm uninstall periplus -n istio-system` (계정 ConfigMap과 클러스터 Secret은 남으므로 완전 삭제 시 함께 지운다).
+설치 후 할 일: ① admin 비밀번호 변경(설정 페이지) ② 계정 추가(설정 → 계정 관리) ③ 멀티클러스터가 필요하면 설정 → 클러스터 관리에서 kubeconfig 등록. 제거는 `helm uninstall istio-dashboard -n istio-system` (계정 ConfigMap과 클러스터 Secret은 남으므로 완전 삭제 시 함께 지운다).
 
 ## 라이선스
 

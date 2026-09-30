@@ -39,7 +39,7 @@ export function Home() {
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-strong">Periplus</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-strong">Istio Dashboard</h1>
           <p className="mt-1 text-sm text-muted">트래픽·보안·텔레메트리 설정을 폼 또는 YAML로 안전하게 관리하세요.</p>
         </div>
         <div className="flex flex-wrap gap-2">

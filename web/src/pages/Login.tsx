@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ApiError, apiPost } from '../api/client'
 
-// 앱 자체 로컬 계정 로그인. 계정은 periplus-accounts ConfigMap에서
+// 앱 자체 로컬 계정 로그인. 계정은 istio-dashboard-accounts ConfigMap에서
 // 관리한다 (한 키 = 한 사용자, 값 = "role:bcryptHash"). 세션은 HttpOnly 쿠키.
 export function Login() {
   const [username, setUsername] = useState('')
@@ -28,7 +28,7 @@ export function Login() {
       <form onSubmit={submit} className="w-full max-w-sm rounded-lg border border-base bg-white p-8 shadow-sm dark:bg-slate-900">
         <div className="mb-1 flex items-center gap-2.5">
           <img src="/favicon.svg" alt="" className="h-7 w-7" />
-          <h1 className="text-lg font-semibold text-strong">Periplus</h1>
+          <h1 className="text-lg font-semibold text-strong">Istio Dashboard</h1>
         </div>
         <p className="mb-4 text-sm text-muted">계정으로 로그인하세요.</p>
         <label className="mb-3 block">
@@ -44,7 +44,7 @@ export function Login() {
           {busy ? '로그인 중…' : '로그인'}
         </button>
         <p className="mt-4 text-xs text-muted">
-          계정 추가/변경은 관리자가 <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">periplus-accounts</code> ConfigMap으로 관리합니다.
+          계정 추가/변경은 관리자가 <code className="rounded bg-gray-100 px-1 dark:bg-slate-800">istio-dashboard-accounts</code> ConfigMap으로 관리합니다.
         </p>
       </form>
     </div>
