@@ -94,7 +94,7 @@ Draws the traffic path purely from routing configuration — no metrics dependen
 - **Interaction** — select a node with a click or keyboard to highlight its paths. The details panel shows its status, hosts, port and resource link. Mouse drag, zoom, fit and layout reset are available. On mobile, horizontal scrolling stays inside the graph.
 - **Refresh** — configuration refreshes every 30 seconds, with a manual refresh button. Failed queries show an error and retry action. Animated connections do not represent actual traffic volume or latency.
 
-![Traffic flow map — path navigation and selected node details](docs/ui-refresh/flow-desktop.png)
+![Traffic flow map — path navigation and selected node details](docs/screenshot-flowmap.png)
 
 [Dark mode](docs/ui-refresh/flow-dark.png) · [Mobile](docs/ui-refresh/flow-mobile.png)
 
@@ -290,7 +290,7 @@ Both the chart and image are published to ghcr.io, so no clone is needed:
 ```bash
 # install (pick any namespace; image defaults to the prebuilt ghcr one)
 helm install istio-dashboard oci://ghcr.io/wonjune95/charts/istio-dashboard \
-  --version 0.6.0 -n istio-system
+  --version 0.7.0 -n istio-system
 
 # try it before exposing
 kubectl -n istio-system port-forward svc/istio-dashboard 8080:8080

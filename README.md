@@ -94,7 +94,7 @@ dynamic client(unstructured) 기반의 단일 CRUD 경로(`/api/resources/{type}
 - **상호작용** — 노드를 클릭하거나 키보드로 선택하면 관련 경로가 강조되고, 아래 상세 영역에서 상태·호스트·포트와 리소스 열기 링크를 확인한다. 마우스 드래그, 확대·축소, 화면에 맞춤, 배치 초기화를 지원한다. 모바일에서는 그래프 영역 안에서 가로 스크롤한다.
 - **갱신** — 30초마다 설정을 다시 조회하며 수동 새로고침도 가능하다. 조회 실패에는 오류와 재시도 버튼을 표시한다. 연결선 애니메이션은 실제 트래픽량이나 지연을 나타내지 않는다.
 
-![트래픽 흐름도 — 경로 탐색과 선택한 노드 상세](docs/ui-refresh/flow-desktop.png)
+![트래픽 흐름도 — 경로 탐색과 선택한 노드 상세](docs/screenshot-flowmap.png)
 
 [다크 모드](docs/ui-refresh/flow-dark.png) · [모바일](docs/ui-refresh/flow-mobile.png)
 
@@ -291,7 +291,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/server ./cmd/server
 ```bash
 # 설치 (네임스페이스는 원하는 곳으로; 이미지 기본값이 ghcr 프리빌트라 --set 불필요)
 helm install istio-dashboard oci://ghcr.io/wonjune95/charts/istio-dashboard \
-  --version 0.6.0 -n istio-system
+  --version 0.7.0 -n istio-system
 
 # 노출 전 바로 접속해보기
 kubectl -n istio-system port-forward svc/istio-dashboard 8080:8080
